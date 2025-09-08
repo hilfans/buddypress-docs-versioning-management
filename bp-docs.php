@@ -73,17 +73,6 @@ function bp_docs_load() {
 }
 
 /**
- * Sets up the BP Docs component.
- *
- * @since 1.0.0
- */
-function bp_docs_setup_component() {
-	// This function is hooked to 'bp_loaded' which ensures BuddyPress is ready.
-	buddypress()->bp_docs = new BP_Docs_Component();
-}
-add_action( 'bp_loaded', 'bp_docs_setup_component' );
-
-/**
  * Plugin activation hook.
  *
  * @since 1.0.0
