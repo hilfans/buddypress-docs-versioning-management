@@ -127,7 +127,7 @@ class BP_Docs_Component extends BP_Component {
                 'parent_slug'     => $this->slug,
                 'parent_url'      => bp_get_group_permalink( $group ) . $this->slug . '/',
                 'screen_function' => array( $this, 'screen_docs_history' ),
-                'position'        => 5İ,
+                'position'        => 51,
                 'user_has_access' => $group->is_member,
             ) );
         }
