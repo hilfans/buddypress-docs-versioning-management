@@ -42,3 +42,31 @@
 <?php endif ?>
 
 <?php do_action( 'bp_docs_after_doc_header_content' ) ?>
+
+<div class="docs-header-widgets">
+    <div id="docs-header-widgets-left">
+		<?php // ** DigiWuz MSP ENHANCEMENT: Add Category Filter Dropdown ** ?>
+		<div class="widget">
+			<form action="" method="get" class="category-filter-form">
+				<label for="bp_docs_cat_filter" class="screen-reader-text"><?php _e( 'Filter by Category', 'buddypress-docs' ); ?></label>
+				<?php
+				wp_dropdown_categories( array(
+					'taxonomy'         => BP_DOCS_CATEGORY_TAXONOMY,
+					'name'             => 'bp_docs_cat',
+					'id'               => 'bp_docs_cat_filter',
+					'show_option_all'  => __( 'All Categories', 'buddypress-docs' ),
+					'hierarchical'     => true,
+					'orderby'          => 'name',
+					'selected'         => isset( $_GET['bp_docs_cat'] ) ? intval( $_GET['bp_docs_cat'] ) : 0,
+				) );
+				?>
+				<input type="submit" value="<?php esc_attr_e( 'Filter', 'buddypress-docs' ); ?>">
+			</form>
+		</div>
+    </div>
+    <div id="docs-header-widgets-right">
+        <?php bp_docs_header_widgets(); ?>
+    </div>
+</div>
+
+<div class="item-list-tabs">
