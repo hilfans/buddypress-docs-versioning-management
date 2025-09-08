@@ -1,1264 +1,1164 @@
 <?php
-
-/**
- * Miscellaneous utility functions
- *
- * @package BuddyPressDocs
- * @since 1.2
- */
-
-/**
- * Return the bp_doc post type name
- *
- * @since 1.2
- *
- * @return str The name of the bp_doc post type
- */
-function bp_docs_get_post_type_name() {
-	global $bp;
-	return $bp->bp_docs->post_type_name;
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
 }
 
 /**
- * Return the associated_item taxonomy name
- *
- * @since 1.2
- */
-function bp_docs_get_associated_item_tax_name() {
-	global $bp;
-	return $bp->bp_docs->associated_item_tax_name;
-}
-
-/**
- * Return the access taxonomy name
- *
- * @since 1.2
- */
-function bp_docs_get_access_tax_name() {
-	global $bp;
-	return $bp->bp_docs->access_tax_name;
-}
-
-/**
- * Return the comment access taxonomy name
- *
- * @since 2.0
- */
-function bp_docs_get_comment_access_tax_name() {
-	return buddypress()->bp_docs->comment_access_tax_name;
-}
-
-/**
- * Utility function to get and cache the current doc
+ * Helper function to determine whether the current page is part of BP Docs
  *
  * @since 1.0-beta
  *
- * @return obj Current doc
+ * @return bool True if the current page is part of BP Docs, otherwise false
  */
-function bp_docs_get_current_doc() {
-	$current_doc = null;
+function bp_docs_is_bp_docs_page() {
+	$is_bp_docs_page = ( bp_is_current_component( BP_DOCS_SLUG ) || bp_is_post_type_archive( buddypress()->bp_docs->post_type_name ) || is_singular( buddypress()->bp_docs->post_type_name ) ) ? true : false;
 
-	// Check the queried object first - this works on custom post type
-	// pages
-	$maybe_doc = get_queried_object();
-	if ( is_a( $maybe_doc, 'WP_Post' ) && bp_docs_get_post_type_name() === $maybe_doc->post_type ) {
-		$current_doc = $maybe_doc;
+	return apply_filters( 'bp_docs_is_bp_docs_page', $is_bp_docs_page );
+}
 
-	// Check if we're in the loop
-	} else if ( $maybe_doc_id = get_the_ID() ) {
-		$maybe_doc = get_post( $maybe_doc_id );
-		if ( bp_docs_get_post_type_name() === $maybe_doc->post_type ) {
-			$current_doc = $maybe_doc;
-		}
-	}
-
-	return apply_filters( 'bp_docs_get_current_doc', $current_doc );
+/**
+ * Get the ID of the default directory page
+ *
+ * @since 1.0-beta
+ *
+ * @return int $page_id The ID of the BP Docs directory page, if it exists
+ */
+function bp_docs_get_page_id() {
+	$page_id = isset( buddypress()->pages->{'docs'}->id ) ? buddypress()->pages->{'docs'}->id : 0;
+	return $page_id;
 }
 
 
 /**
- * Get an item_id based on a taxonomy term slug
+ * Get the proper URL for a given item in the BP Docs component
  *
- * BuddyPress Docs are associated with groups and users through a taxonomy called
- * bp_docs_associated_item. Terms belonging to this taxonomy have slugs that look like this
- * (since 1.2):
- *   4-user
- *   103-group
- * (where 4-user corresponds to the user with the ID 4, and 103 is the group with group_id 103).
- * If you have a term slug, you can use this function to parse the item id out of it. Note that
- * it will return 0 if you pass a slug that belongs to a different item type.
- *
- * @since 1.2
- * @param str $term_slug The 'slug' property of a WP term object
- * @param str $item_type 'user', 'group', or your custom item type
- * @return mixed Returns false if you don't pass in the proper parameters.
- *		 Returns 0 if you pass a slug that does not correspond to your item_type
- *	         Returns an int (the unique item_id) if successful
+ * @since 1.0-beta
+ * @param string $item The component item. Either 'directory' or 'slug'
+ * @param array $args Miscellaneous arguments to be passed
+ * @return str $url The URL of the component item
  */
-function bp_docs_get_associated_item_id_from_term_slug( $term_slug = '', $item_type = '' ) {
-	if ( !$term_slug || !$item_type ) {
-		return false;
+function bp_docs_get_link( $item, $args = array() ) {
+
+	switch ( $item ) {
+		case 'directory' :
+			$url = trailingslashit( bp_get_root_domain() . '/' . BP_DOCS_SLUG );
+			break;
+
+		case 'slug' :
+			$url = trailingslashit( bp_get_root_domain() . '/' . BP_DOCS_SLUG );
+			break;
 	}
 
-	$item_id = 0;
-
-	// The item_type should be hidden in the slug
-	$slug_array = explode( '-', $term_slug );
-
-	if ( isset( $slug_array[1] ) && $item_type == $slug_array[1] ) {
-		$item_id = $slug_array[0];
-	}
-
-	return apply_filters( 'bp_docs_get_associated_item_id_from_term_slug', $item_id, $term_slug, $item_type );
+	return apply_filters( 'bp_docs_get_link', $url );
 }
 
 /**
- * Get the term_id for the associated_item term corresponding to a item_id
+ * Returns the URL for a single doc
  *
- * Will create it if it's not found
+ * This function handles the logic of figuring out whether the doc is associated with a group,
+ * and if so, builds the URL with the group slug in it.
  *
- * @since 1.2
+ * @since 1.0-beta
  *
- * @param int $item_id Such as the group_id or user_id
- * @param str $item_type Such as 'user' or 'group' (slug of the parent term)
- * @param str $item_name Optional. This is the value that will be used to describe the term in the
- *    Dashboard.
- * @return int $item_term_id
+ * @param int $doc_id The id of the doc
+ * @return str $link The URL of the doc
  */
-function bp_docs_get_item_term_id( $item_id, $item_type, $item_name = '' ) {
+function bp_docs_get_doc_link( $doc_id = false ) {
 	global $bp;
 
-	if ( empty( $item_id ) ) {
+	if ( !$doc_id ) {
+		$doc_id = get_the_ID();
+	}
+
+	$doc = get_post( $doc_id );
+
+	if ( empty( $doc->ID ) ) {
 		return;
 	}
 
-	// Sanitization
-	// @todo Maybe this should be more generous
-	$item_type = 'group' == $item_type ? 'group' : 'user';
+	$permalink = get_permalink( $doc->ID );
 
-	$item_term_slug = 'bp_docs_associated_' . $item_type . '_' . $item_id;
-
-	$item_term = get_term_by( 'slug', $item_term_slug, bp_docs_get_associated_item_tax_name() );
-
-	// If the item term doesn't exist, then create it
-	if ( empty( $item_term ) ) {
-		// Set up the arguments for creating the term. Filter this to set your own
-		switch ( $item_type ) {
-			case 'group' :
-				$item = groups_get_group( array( 'group_id' => $item_id ) );
-				$item_name = $item->name;
-				break;
-
-			case 'user' :
-			default :
-				$item_name = bp_core_get_user_displayname( $item_id );
-				break;
-		}
-
-		$item_term_args = apply_filters( 'bp_docs_item_term_values', array(
-			'description' => sprintf( _x( 'Docs associated with the %1$s %2$s', 'Description for the associated-item taxonomy term. Of the form "Docs associated with the [item-type] [item-name]" - item-type is group, user, etc', 'buddypress-docs' ), $item_type, $item_name ),
-			'slug'        => $item_term_slug,
-		) );
-
-		// Create the item term
-		$item_term = wp_insert_term( $item_name, bp_docs_get_associated_item_tax_name(), $item_term_args );
-		$term_id = ( ! is_wp_error( $item_term ) && isset( $item_term['term_id'] ) ) ? $item_term['term_id'] : false;
-	} else {
-		$term_id = $item_term->term_id;
+	// BP-Default theme needs this to work correctly
+	if ( function_exists( 'bp_is_group' ) && bp_is_group() && !empty( $bp->groups->current_group ) ) {
+		$group_slug = $bp->groups->current_group->slug;
+		$permalink = trailingslashit( bp_get_group_permalink( $bp->groups->current_group ) . BP_DOCS_SLUG . '/' . $doc->post_name );
 	}
 
-	return apply_filters( 'bp_docs_get_item_term_id', $term_id, $item_id, $item_type, $item_name );
+	return $permalink;
 }
 
 /**
- * Get the absolute path of a given template.
+ * When a doc is associated with a group, WP doesn't know about it. So we have to build
+ * the URLs manually.
  *
- * Looks first for a template in [theme-dir]/docs/, and falls back on the provided templates.
- *
- * Ideally, I would not need this function. But WP's locate_template() plays funny with directory
- * paths, and bp_core_load_template() does not have an option that will let you locate but not load
- * the found template.
- *
- * @since 1.0.5
- * @since 7.0.0 Added $args parameter.
- *
- * @param str   $template This string should be of the format 'edit-docs.php'. Ie, you need '.php',
- *                        but you don't need the leading '/docs/'
- * @param array $args     Extra args to pass to locate_template().
- * @return str $template_path The absolute path of the located template file.
+ * @since 1.0
  */
-function bp_docs_locate_template( $template = '', $load = false, $require_once = true, $args = array() ) {
-	if ( empty( $template ) )
-		return false;
+function bp_docs_get_doc_slug_in_group_context( $doc_id, $group_id = 0 ) {
+	$bp = buddypress();
 
-	// Try to load custom templates first
-	$stylesheet_path = STYLESHEETPATH . '/docs/';
-	$template_path   = TEMPLATEPATH . '/docs/';
-
-	if ( file_exists( $stylesheet_path . $template ) )
-		$template_path = $stylesheet_path . $template;
-	elseif ( file_exists( $template_path . $template ) )
-		$template_path = $template_path . $template;
-	else
-		$template_path = BP_DOCS_INCLUDES_PATH . 'templates/docs/' . $template;
-
-	$template_path = apply_filters( 'bp_docs_locate_template', $template_path, $template, $args );
-
-	if ( $template_path ) {
-		if ( $load ) {
-			load_template( $template_path, $require_once, $args );
-		} else {
-			return $template_path;
-		}
-	} else if ( function_exists( 'is_buddypress' ) ) {
-
-		if ( bp_docs_is_docs_component() ) {
-			status_header( 200 );
-			$wp_query->is_page     = true;
-			$wp_query->is_singular = true;
-			$wp_query->is_404      = false;
-		}
-
-		do_action( 'bp_setup_theme_compat' );
-	}
-}
-
-/**
- * Determine whether the current user can do something the current doc
- *
- * @since 1.0-beta
- * @deprecated 1.8
- *
- * @param str $action The cap being tested
- * @return bool $user_can
- */
-function bp_docs_current_user_can( $action = 'edit', $doc_id = false ) {
-	_deprecated_function( __FUNCTION__, '1.8', 'Use current_user_can() with "bp_docs_" prefixed capabilities instead.' );
-
-	$user_can = bp_docs_user_can( $action, bp_loggedin_user_id(), $doc_id );
-
-	return apply_filters( 'bp_docs_current_user_can', $user_can, $action );
-}
-
-/**
- * Determine whether a given user can do something with a given doc
- *
- * @since 1.0-beta
- *
- * @param str $action Optional. The action being queried. Eg 'edit', 'read_comments', 'manage'
- * @param int $user_id Optional. Unique user id for the user being tested. Defaults to logged-in ID
- * @param int $doc_id Optional. Unique doc id. Defaults to doc currently being viewed
- */
-function bp_docs_user_can( $action = 'edit', $user_id = false, $doc_id = false ) {
-	global $bp, $post;
-
-	if ( false === $user_id ) {
-		$user_id = bp_loggedin_user_id();
+	if ( ! $group_id ) {
+		$group_id = ! empty( $bp->groups->current_group->id ) ? $bp->groups->current_group->id : 0;
 	}
 
-	// Grant all permissions on documents being created, as long as the
-	// user is logged in
-	if ( $user_id && ( false === $doc_id ) && bp_docs_is_doc_create() ) {
-		return true;
+	if ( ! $group_id ) {
+		return '';
 	}
 
-	if ( ! $doc_id ) {
-		if ( ! empty( $post->ID ) && bp_docs_get_post_type_name() === $post->post_type ) {
-			$doc_id = $post->ID;
-			$doc = $post;
-		} else {
-			$doc = bp_docs_get_current_doc();
-			if ( isset( $doc->ID ) ) {
-				$doc_id = $doc->ID;
-			}
-		}
-	} else {
-		$doc = get_post( $doc_id );
-	}
-
-	$user_can = false;
-
-	if ( 'create' === $action ) {
-
-		// In the case of Doc creation, this value gets passed through
-		// to other components
-		$user_can = 0 != $user_id;
-
-	} else if ( ! empty( $doc ) ) {
-		$doc_settings = bp_docs_get_doc_settings( $doc_id );
-		$the_setting  = isset( $doc_settings[ $action ] ) ? $doc_settings[ $action ] : '';
-
-		if ( empty( $the_setting ) ) {
-			$the_setting = 'anyone';
-		}
-
-		switch ( $the_setting ) {
-			case 'anyone' :
-				$user_can = true;
-				break;
-
-			case 'loggedin' :
-				$user_can = 0 != $user_id;
-				break;
-
-			case 'creator' :
-				$user_can = $doc->post_author == $user_id;
-				break;
-			// Do nothing with other settings - they are passed through
-		}
-	}
-
-	// Temp - this should be more organized
-	if ( 'manage_folders' === $action ) {
-		if ( bp_is_active( 'groups' ) && bp_is_group() ) {
-			$user_can = groups_is_user_admin( $user_id, bp_get_current_group_id() );
-		} else if ( bp_is_user() ) {
-			$user_can = bp_is_my_profile();
-		} else {
-			$user_can = current_user_can( 'bp_moderate' );
-		}
-	}
-
-	if ( $user_id ) {
-		if ( is_super_admin( $user_id ) ) {
-			// Super admin always gets to edit. What a big shot
-			$user_can = true;
-		} else {
-			// Filter this so that groups-integration and other plugins can give their
-			// own rules. Done inside the conditional so that plugins don't have to
-			// worry about the is_super_admin() check
-			$user_can = apply_filters( 'bp_docs_user_can', $user_can, $action, $user_id, $doc_id );
-		}
-	}
-
-	return $user_can;
-}
-
-/**
- * Can the current user create a Doc in this context?
- *
- * Is sensitive to group contexts (and the "associated with" permissions
- * levels)
- *
- * @since 1.5
- * @return bool
- */
-function bp_docs_current_user_can_create_in_context() {
-	if ( function_exists( 'bp_is_group' ) && bp_is_group() ) {
-		$can_create = current_user_can( 'bp_docs_associate_with_group', bp_get_current_group_id() );
-	} else {
-		$can_create = current_user_can( 'bp_docs_create' );
-	}
-
-	return apply_filters( 'bp_docs_current_user_can_create_in_context', $can_create );
-}
-
-/**
- * Update the Doc count for a given item
- *
- * @since 1.2
- */
-function bp_docs_update_doc_count( $item_id = 0, $item_type = '' ) {
-	global $bp;
-
-	$doc_count = 0;
-	$docs_args = array( 'doc_slug' => '' );
-
-	switch ( $item_type ) {
-		case 'group' :
-			$docs_args['author_id'] = null;
-			$docs_args['group_id']  = $item_id;
-			break;
-
-		case 'user' :
-			$docs_args['author_id'] = $item_id;
-			$docs_args['group_id']  = null;
-			break;
-
-		default :
-			$docs_args['author_id'] = null;
-			$docs_args['group_id']  = null;
-			break;
-	}
-
-	$query = new BP_Docs_Query( $docs_args );
-	$query->get_wp_query();
-	if ( $query->query->have_posts() ) {
-		$doc_count = $query->query->found_posts;
-	}
-
-	// BP has a stupid bug that makes it delete groupmeta when it equals 0. We'll save
-	// a string instead of zero to work around this
-	if ( !$doc_count )
-		$doc_count = '0';
-
-	// Save the count
-	switch ( $item_type ) {
-		case 'group' :
-			groups_update_groupmeta( $item_id, 'bp-docs-count', $doc_count );
-			break;
-
-		case 'user' :
-			update_user_meta( $item_id, 'bp_docs_count', $doc_count );
-			break;
-
-		default :
-			bp_update_option( 'bp_docs_count', $doc_count );
-			break;
-	}
-
-	return $doc_count;
-}
-
-/**
- * Is this the BP Docs component?
- */
-function bp_docs_is_docs_component() {
-	$retval = false;
-
-	$p = get_queried_object();
-
-	if ( is_post_type_archive( bp_docs_get_post_type_name() ) ) {
-		$retval = true;
-	} else if ( isset( $p->post_type ) && bp_docs_get_post_type_name() == $p->post_type ) {
-		$retval = true;
-	} else if ( bp_is_current_component( bp_docs_get_docs_slug() ) ) {
-		// This covers cases where we're looking at the Docs component of a user
-		$retval = true;
-	} else if ( bp_is_current_action( bp_docs_get_docs_slug() ) ) {
-		// This covers cases where we're looking at the Docs library of a group.
-		$retval = true;
-	}
-
-	return $retval;
-}
-
-/**
- * Get the Doc settings array
- *
- * This will prepopulate many of the required settings, for cases where the settings have not
- * yet been saved for this Doc.
- *
- * @param int $doc_id
- * @param string $type 'default' parses with default options to ensure that all
- *        keys have values. 'raw' returns results as stored in the database.
- * @return array
- */
-function bp_docs_get_doc_settings( $doc_id = 0, $type = 'default', $group_id = 0 ) {
-	$doc_settings = array();
-
-	$q = get_queried_object();
-	if ( !$doc_id && isset( $q->ID ) ) {
-		$doc_id = $q->ID;
-	}
-
-	$saved_settings = get_post_meta( $doc_id, 'bp_docs_settings', true );
-	if ( !is_array( $saved_settings ) ) {
-		$saved_settings = array();
-	}
-
-	$default_settings = bp_docs_get_default_access_options( $doc_id, $group_id );
-
-	if ( 'raw' !== $type ) {
-		// Empty string settings can slip through sometimes
-		$saved_settings = array_filter( $saved_settings );
-
-		$doc_settings = wp_parse_args( $saved_settings, $default_settings );
-	} else {
-		$doc_settings = $saved_settings;
-	}
-
-	return apply_filters( 'bp_docs_get_doc_settings', $doc_settings, $doc_id, $default_settings, $saved_settings, $group_id );
-}
-
-function bp_docs_define_tiny_mce() {
-	BP_Docs_Query::define_wp_tiny_mce();
-}
-
-/**
- * Send a Doc to the trash
- *
- * @since 1.3
- * @param int  $doc_id       ID of the doc to be trashed.
- * @param bool $force_delete Whether to bypass the trash and delete permanently.
- * @return bool
- */
-function bp_docs_trash_doc( $doc_id = 0, $force_delete = false ) {
-	do_action( 'bp_docs_before_doc_delete', $doc_id );
-	$deleted = false;
-	$delete_args = array(
-		'ID' => $doc_id,
-		'post_status' => 'trash'
-	);
-
-	/*
-	 * If the $force_delete option is true, we bypass the trash and permanently delete the doc.
-	 * If the post is already in the trash, we permanently delete it.
-	 * If the post is not in the trash, we put it in the trash.
-	 */
-	if ( $force_delete ) {
-		$deleted = wp_delete_post( $doc_id, true );
-	} elseif ( 'trash' == get_post_status( $doc_id ) ) {
-		$deleted = wp_delete_post( $doc_id );
-	} else {
-		$deleted = wp_update_post( $delete_args );
-	}
-
-	if ( $deleted ) {
-		do_action( 'bp_docs_doc_deleted', $delete_args );
-		return true;
-	}
-
-	return false;
-}
-
-/**
- * Remove a Doc from the Trash.
- *
- * @since 1.5.5
- * @param int $doc_id ID of the Doc to be untrashed.
- * @return bool True on success, otherwise false.
- */
-function bp_docs_untrash_doc( $doc_id = 0 ) {
-	do_action( 'bp_docs_before_doc_untrash', $doc_id );
-
-	$untrashed = wp_update_post( array(
-		'ID' => $doc_id,
-		'post_status' => 'publish',
+	$group = groups_get_group( array(
+		'group_id' => $group_id,
 	) );
 
-	if ( $untrashed ) {
-		do_action( 'bp_docs_doc_untrashed', $doc_id );
-		return true;
-	}
+	$doc = get_post( $doc_id );
 
-	return false;
+	return trailingslashit( bp_get_group_permalink( $group ) . bp_docs_get_slug() . '/' . $doc->post_name );
 }
 
 /**
- * Outputs a list of access options
+ * Get the current query args for pagination purposes.
  *
- * Access options are things like 'anyone', 'loggedin', 'group-members', etc
+ * @since 1.0-beta
+ * @return array $query_args
  */
-function bp_docs_get_access_options( $settings_field, $doc_id = 0, $group_id = 0 ) {
-	$options = array();
+function bp_docs_get_query_args() {
+	$query_args = array();
 
-	// The base options for every setting
-	$options = array(
-		20 => array(
-			'name'  => 'loggedin',
-			'label' => __( 'Logged-in Users', 'buddypress-docs' ),
-			'default' => 1 // default to 'loggedin' for most options. See below for override
-		),
-		90 => array(
-			'name'  => 'creator',
-			'label' => __( 'The Doc author only', 'buddypress-docs' )
-		),
+	// Search terms
+	if ( isset( $_GET['s'] ) && !empty( $_GET['s'] ) )
+		$query_args['s'] = $_GET['s'];
+
+	return $query_args;
+}
+
+
+/**
+ * Is the current user allowed to create a new Doc?
+ *
+ * @since 1.0-beta
+ *
+ * @param array $args
+ * - group_id Find out for a given group. Optional. Defaults to current group
+ * @return bool
+ */
+function bp_docs_current_user_can_create( $args = array() ) {
+	$can_create = false;
+
+	if ( is_user_logged_in() ) {
+		$can_create = true;
+	}
+
+	// In the context of a group, check group permissions as well
+	if ( bp_is_active( 'groups' ) ) {
+		$group = ! empty( $args['group_id'] ) ? groups_get_group( array( 'group_id' => $args['group_id'] ) ) : groups_get_current_group();
+
+		if ( ! empty( $group->id ) ) {
+			// Backwards compatibility for pre-1.2 group settings
+			if ( isset( $group->enable_docs ) && !$group->enable_docs ) {
+				$can_create = false;
+
+			// Check the new-style group settings
+			} else if ( ! bp_docs_is_docs_enabled_for_group( $group->id ) ) {
+				$can_create = false;
+			}
+		}
+	}
+
+	return apply_filters( 'bp_docs_current_user_can_create', $can_create );
+}
+
+
+/**
+ * Get the slug of the Docs component.
+ *
+ * @since 1.0-beta
+ */
+function bp_docs_get_slug() {
+	return BP_DOCS_SLUG;
+}
+
+
+/**
+ * Is a given user a member of the current group?
+ *
+ * @since 1.0-beta
+ *
+ * @param int $user_id The id of the user being checked
+ * @return bool $is_member True if the user is a member, otherwise false
+ */
+function bp_docs_is_existing_member( $user_id ) {
+	global $bp;
+
+	if ( empty( $user_id ) )
+		return false;
+
+	return groups_is_user_member( $user_id, $bp->groups->current_group->id );
+}
+
+/**
+ * Echoes the Doc title
+ *
+ * @since 1.0-beta
+ * @uses bp_docs_get_doc_title()
+ */
+function bp_docs_doc_title() {
+	echo bp_docs_get_doc_title();
+}
+	/**
+	 * Returns the Doc title
+	 *
+	 * @since 1.0-beta
+	 */
+	function bp_docs_get_doc_title() {
+		return apply_filters( 'bp_docs_get_doc_title', get_the_title() );
+	}
+
+/**
+ * Echoes the Doc permalink
+ *
+ * @since 1.0-beta
+ * @uses bp_docs_get_doc_permalink()
+ */
+function bp_docs_doc_permalink() {
+	echo bp_docs_get_doc_permalink();
+}
+	/**
+	 * Returns the Doc permalink
+	 *
+	 * @since 1.0-beta
+	 */
+	function bp_docs_get_doc_permalink() {
+		return apply_filters( 'bp_docs_get_doc_permalink', get_permalink() );
+	}
+
+/**
+ * Echoes the Doc content
+ *
+ * @since 1.0-beta
+ * @uses bp_docs_get_doc_content()
+ */
+function bp_docs_doc_content() {
+	echo bp_docs_get_doc_content();
+}
+	/**
+	 * Returns the Doc content
+	 *
+	 * @since 1.0-beta
+	 */
+	function bp_docs_get_doc_content() {
+		global $post;
+		return apply_filters( 'the_content', $post->post_content );
+	}
+
+/**
+ * Echoes the Doc edit link
+ *
+ * @since 1.1
+ * @uses bp_docs_get_doc_edit_link()
+ */
+function bp_docs_doc_edit_link() {
+	echo bp_docs_get_doc_edit_link();
+}
+	/**
+	 * Returns the Doc edit link
+	 *
+	 * @since 1.1
+	 */
+	function bp_docs_get_doc_edit_link( $doc_id = false ) {
+		if ( !$doc_id ) {
+			$doc_id = get_the_ID();
+		}
+
+		$doc_link = bp_docs_get_doc_link( $doc_id );
+
+		return apply_filters( 'bp_docs_get_doc_edit_link', trailingslashit( $doc_link ) . BP_DOCS_EDIT_SLUG );
+	}
+
+
+/**
+ * Get a list of the user's groups
+ *
+ * This is a wrapper for bp_has_groups(), which fixes a problem with the way that function handles
+ * pagination, and also simplifies the output. Used on the Create and Edit pages.
+ *
+ * @since 1.0-beta
+ *
+ * @param array $args
+ * @return array $user_groups An array of the user's groups
+ */
+function bp_docs_get_user_groups( $args = array() ) {
+	global $bp;
+
+	// Respect the can_create_in_any_group setting
+	if ( ! current_user_can( 'bp_docs_create_in_any_group' ) ) {
+		$user_id = bp_loggedin_user_id();
+	} else {
+		$user_id = false;
+	}
+
+	$defaults = array(
+		'user_id'         => $user_id,
+		'per_page'        => 999,
+		'max'             => 999,
+		'populate_extras' => false
 	);
 
-	// Default to manage => creator.
-	if ( 'manage' == $settings_field ) {
-		// Unset the default of loggedin.
-		$options[20]['default'] = 0;
+	$r = wp_parse_args( $args, $defaults );
+	extract( $r );
 
-		$options[90]['default'] = 1;
-	}
-
-	// Allow anonymous reading
-	if ( in_array( $settings_field, array( 'read', 'read_comments', 'view_history' ) )
-		// Allow anonymous comment posting setting if site option allows it.
-		|| ( 'post_comments' == $settings_field && ! get_option( 'comment_registration' ) )
-		) {
-		$options[10] = array(
-			'name'  => 'anyone',
-			'label' => __( 'Anyone', 'buddypress-docs' ),
-			'default' => 1
-		);
-
-		$options[20]['default'] = 0; // Default to 'anyone' instead
-	}
-
-	// Other integration pieces can mod the options with this filter
-	$options = apply_filters( 'bp_docs_get_access_options', $options, $settings_field, $doc_id, $group_id );
-
-	// Options are sorted by the numeric key
-	ksort( $options );
-
-	return $options;
-}
-
-/**
- * Builds the default access options for a doc.
- *
- * @since 1.8.8
- * @param int $doc_id ID of the doc.
- * @param int $group_id ID of the group that this doc is associated with.
- *
- * @return array Associative array of settings_field => default_option.
- */
-function bp_docs_get_default_access_options( $doc_id = 0, $group_id = 0 ) {
-	// We may be able to get the associated group from the doc_id.
-	if ( empty( $group_id ) && ! empty( $doc_id ) ) {
-		$group_id = bp_is_active( 'groups' ) ? bp_docs_get_associated_group_id( $doc_id ) : 0;
-	}
-
-	$defaults = array();
-	$settings_fields = array( 'read', 'edit', 'read_comments', 'post_comments', 'view_history', 'manage' );
-
-	foreach ( $settings_fields as $settings_field ) {
-		$access_options = bp_docs_get_access_options( $settings_field, $doc_id, $group_id );
-
-		foreach ( $access_options as $key => $access_option ) {
-			if ( ! empty( $access_option['default'] ) ) {
-				$defaults[$settings_field] = $access_option['name'];
-				break;
+	$groups = array();
+	if ( bp_has_groups( $r ) ) {
+		while ( bp_groups() ) {
+			bp_the_group();
+			if ( bp_docs_is_docs_enabled_for_group() ) {
+				$groups[] = clone( $bp->groups->current_group );
 			}
 		}
 	}
 
-	return apply_filters( 'bp_docs_get_default_access_options', $defaults, $doc_id, $group_id );
+	return apply_filters( 'bp_docs_get_user_groups', $groups );
+}
+
+
+/**
+ * Is the current page the Create page?
+ *
+ * @since 1.0-beta
+ *
+ * @return bool $is_create_page
+ */
+function bp_docs_is_doc_create() {
+	global $bp;
+
+	$is_create_page = false;
+
+	if ( bp_is_current_action( BP_DOCS_CREATE_SLUG ) ) {
+		$is_create_page = true;
+	}
+
+	return $is_create_page;
 }
 
 /**
- * Saves the settings associated with a given Doc
+ * Get the proper title for the current Docs page.
  *
- * @since 1.6.1
- * @param int   $doc_id     The numeric ID of the doc
- * @param int   $author_id  The numeric ID of the author
- * @param array $settings   The settings array as passed to the save() method.
- * @param bool  $is_new_doc Is a doc being created or edited? Default: false.
- * @return string Notice of access setting modification
+ * @since 1.0-beta
+ *
+ * @return str $title The title for the page
  */
-function bp_docs_save_doc_access_settings( $doc_id, $author_id, $settings, $is_new_doc = false ) {
-	if ( empty( $author_id ) ) {
-		$author_id = bp_loggedin_user_id();
-	}
-	$message = '';
+function bp_docs_get_page_title() {
+	global $bp;
 
-	/*
-	 * Two cases:
-	 * 1. User is saving a doc for which he can update the access settings
-	 *    OR the doc is new and should inherit default settings if none are supplied.
-	 */
-	if ( ! empty( $settings ) || $is_new_doc ) {
-		$verified_settings = bp_docs_verify_settings( $settings, $doc_id, $author_id );
+	$title = '';
 
-		$new_settings = array();
-		foreach ( $verified_settings as $verified_setting_name => $verified_setting ) {
-			$new_settings[ $verified_setting_name ] = $verified_setting['verified_value'];
-			if ( $verified_setting['verified_value'] != $verified_setting['original_value'] ) {
-				$message = __( 'Your Doc was successfully saved, but some of your access settings have been changed to match the Doc\'s permissions.', 'buddypress-docs' );
-			}
-		}
-
-		update_post_meta( $doc_id, 'bp_docs_settings', $new_settings );
-
-		// The 'read' setting must also be saved to a taxonomy, for
-		// easier directory queries
-		$read_setting = isset( $new_settings['read'] ) ? $new_settings['read'] : 'anyone';
-		bp_docs_update_doc_access( $doc_id, $read_setting );
-
-		/*
-		 * The 'read_comments' setting must also be saved to a taxonomy,
-		 * to protect non-public comments.
-		 */
-		$read_comments_setting = isset( $new_settings['read_comments'] ) ? $new_settings['read_comments'] : 'anyone';
-		bp_docs_update_doc_comment_access( $doc_id, $read_comments_setting );
-
-	// 2. User is saving a doc for which he can't manage the access settings
-	// isset( $_POST['settings'] ) is false; the access settings section
-	// isn't included on the edit form
-	} else {
-		// Do nothing.
-		// Leave the access settings intact.
+	if ( bp_is_current_action( BP_DOCS_CREATE_SLUG ) ) {
+		$title = __( 'Create New Doc', 'buddypress-docs' );
+	} else if ( bp_is_current_action( 'edit' ) ) {
+		$title = __( 'Edit Doc', 'buddypress-docs' );
 	}
 
-	return $message;
+	return apply_filters( 'bp_docs_get_page_title', $title );
 }
 
 /**
- * Reset group-related doc access settings to "creator"
+ * Returns a list of a Doc's associated groups (usually just one)
  *
- * @since 1.9.0
- * @param int $doc_id The numeric ID of the doc
- * @return void
+ * @since 1.0-beta
+ *
+ * @param int $doc_id The ID of the Doc
+ * @return array $groups The group or groups the Doc is associated with
  */
-function bp_docs_remove_group_related_doc_access_settings( $doc_id ) {
+function bp_docs_get_associated_groups( $doc_id ) {
+	$bp = buddypress();
+
 	if ( empty( $doc_id ) ) {
+		return false;
+	}
+
+	$group_ids = wp_get_object_terms( $doc_id, $bp->bp_docs->associated_item_tax_name );
+
+	$groups = array();
+	foreach ( $group_ids as $group_id ) {
+		$groups[] = groups_get_group( array( 'group_id' => $group_id ) );
+	}
+
+	return apply_filters( 'bp_docs_get_associated_groups', $groups );
+}
+
+/**
+ * Is this doc associated with the current group?
+ *
+ * @since 1.0-beta
+ *
+ * @param int $doc_id The ID of the Doc being checked. Defaults to the current Doc in the loop
+ * @return bool $is_associated True if the doc is associated with the group, false otherwise
+ */
+function bp_docs_is_doc_associated_with_current_group( $doc_id = false ) {
+	$bp = buddypress();
+
+	if ( !$doc_id ) {
+		$doc_id = get_the_ID();
+	}
+
+	$is_associated = false;
+
+	if ( !empty( $bp->groups->current_group ) ) {
+		$is_associated = has_term( $bp->groups->current_group->id, $bp->bp_docs->associated_item_tax_name, $doc_id );
+	}
+
+	return apply_filters( 'bp_docs_is_doc_associated_with_current_group', $is_associated, $doc_id );
+}
+
+/**
+ * Checks whether a doc has an associated group
+ *
+ * @since 1.1.2
+ *
+ * @param int $doc_id The ID of the Doc being checked. Defaults to the current Doc in the loop
+ * @return bool Returns true if the doc is associated with a group, otherwise false
+ */
+function bp_docs_doc_is_in_group( $doc_id = false ) {
+	$bp = buddypress();
+
+	if ( !$doc_id ) {
+		$doc_id = get_the_ID();
+	}
+
+	$terms = wp_get_post_terms( $doc_id, $bp->bp_docs->associated_item_tax_name );
+
+	return apply_filters( 'bp_docs_doc_is_in_group', !empty( $terms ), $doc_id, $terms );
+}
+
+
+/**
+ * Get the ID of the group associated with a given doc
+ *
+ * We are assuming for now that there will only be one group per doc
+ *
+ * @since 1.0-beta
+ *
+ * @param int $doc_id The ID of the doc
+ * @return int $group_id The ID of the group
+ */
+function bp_docs_get_associated_group_id( $doc_id ) {
+	$bp = buddypress();
+
+	$group_terms = wp_get_object_terms( $doc_id, $bp->bp_docs->associated_item_tax_name );
+
+	if ( !empty( $group_terms ) && !is_wp_error( $group_terms ) ) {
+		$group_id = intval( $group_terms[0]->name );
+	} else {
+		$group_id = 0;
+	}
+
+	return apply_filters( 'bp_docs_get_associated_group_id', $group_id );
+}
+
+/**
+ * Catches the doc creation form submission, creates the doc, and redirects.
+ *
+ * @since 1.0-beta
+ */
+function bp_docs_handle_doc_creation() {
+	if ( !isset( $_POST['bp_docs_submitted'] ) )
 		return;
+
+	// Check nonce
+	check_admin_referer( 'bp_docs_create' );
+
+	global $bp;
+
+	$doc_id = isset( $_POST['doc_id'] ) ? $_POST['doc_id'] : 0;
+
+	// Check to see that the title and content are not empty
+	if ( empty( $_POST['doc_title'] ) ) {
+		bp_core_add_message( __( 'Your Doc could not be saved. Please give it a title.', 'buddypress-docs' ), 'error' );
+		bp_core_redirect( bp_get_root_domain() );
 	}
 
-	// When a doc's privacy relies on group association, and that doc loses that group association, we need to make sure that it doesn't become public.
-	$settings = bp_docs_get_doc_settings( $doc_id );
-	$group_settings = array( 'admins-mods','group-members' );
-	$settings_modified = false;
-
-	foreach ( $settings as $capability => $audience ) {
-		if ( in_array( $audience, $group_settings ) ) {
-			$new_settings[ $capability ] = 'creator';
-			$settings_modified = true;
-		} else {
-			$new_settings[ $capability ] = $audience;
-		}
+	if ( empty( $_POST['doc_content'] ) ) {
+		bp_core_add_message( __( 'Your Doc could not be saved. Please add some content.', 'buddypress-docs' ), 'error' );
+		bp_core_redirect( bp_get_root_domain() );
 	}
 
-	if ( $settings_modified ) {
-		update_post_meta( $doc_id, 'bp_docs_settings', $new_settings );
-	}
+	// Not checking for doc_id, as we may be creating a new doc from a previous one
+	$new_doc_args = array(
+		'post_title'	=> $_POST['doc_title'],
+		'post_content'	=> $_POST['doc_content'],
+		'post_type'	=> $bp->bp_docs->post_type_name
+	);
 
-	// The 'read' setting must also be saved to a taxonomy, for
-	// easier directory queries. Update if modified.
-	if ( $settings['read'] != $new_settings['read'] ) {
-		bp_docs_update_doc_access( $doc_id, $new_settings['read'] );
-	}
-
-	/*
-	 * The 'read_comments' setting must also be saved to a taxonomy,
-	 * to protect non-public comments. Update if modified.
-	 */
-	if ( $settings['read_comments'] != $new_settings['read_comments'] ) {
-		bp_docs_update_doc_comment_access( $doc_id, $new_settings['read_comments'] );
-	}
-}
-
-/**
- * Verifies the settings associated with a given Doc
- *
- * @since 1.2
- * @param array $settings Settings passed from the Edit form
- * @param int $doc_id The numeric ID of the doc
- * @param int $user_id The id of the user
- * @return array $is_allowed Keyed by settings names, with boolean values
- */
-function bp_docs_verify_settings( $settings, $doc_id, $user_id = 0 ) {
-	$verified_settings = array();
-
-	foreach ( $settings as $setting_name => $setting_value ) {
-		$allowed_values = bp_docs_get_access_options( $setting_name, $doc_id );
-
-		$verified_settings[ $setting_name ] = array(
-			'original_value'  => $setting_value,
-			'verified_value'  => '',
-			'setting_default' => '',
-		);
-
-		// Loop through to collect whitelisted values as well as the
-		// default setting, which will be used if the user-provided
-		// value doesn't match the whitelist
-		foreach ( $allowed_values as $allowed_value ) {
-			if ( empty( $verified_settings[ $setting_name ]['verified_value'] ) && $setting_value == $allowed_value['name'] ) {
-				$verified_settings[ $setting_name ]['verified_value'] = $setting_value;
-			}
-
-			if ( empty( $verified_settings[ $setting_name ]['setting_default'] ) && 1 == $allowed_value['default'] ) {
-				$verified_settings[ $setting_name ]['setting_default'] = 1;
-			}
-		}
-
-		// If no whitelisted value has been found, attempt to fall
-		// back on a default value for that option
-		if ( empty( $verified_settings[ $setting_name ] ) ) {
-			$verified_settings[ $setting_name ]['verified_value'] = $verified_settings[ $setting_name ]['setting_default'];
-		}
-	}
-
-	return $verified_settings;
-}
-
-/* Doc "read" access taxonomy terms. ******************************************/
-
-/**
- * Get the access term for 'anyone'
- *
- * @since 1.2
- * @return string The term slug
- */
-function bp_docs_get_access_term_anyone() {
-	return apply_filters( 'bp_docs_get_access_term_anyone', 'bp_docs_access_anyone' );
-}
-
-/**
- * Get the access term for 'loggedin'
- *
- * @since 1.2
- * @return string The term slug
- */
-function bp_docs_get_access_term_loggedin() {
-	return apply_filters( 'bp_docs_get_access_term_loggedin', 'bp_docs_access_loggedin' );
-}
-
-/**
- * Get the access term for a user id
- *
- * @since 1.2
- * @param int|bool $user_id Defaults to logged in user
- * @return string The term slug
- */
-function bp_docs_get_access_term_user( $user_id = false ) {
-	if ( false === $user_id ) {
-		$user_id = bp_loggedin_user_id();
-	}
-
-	return apply_filters( 'bp_docs_get_access_term_user', 'bp_docs_access_user_' . intval( $user_id ) );
-}
-
-/**
- * Get the access term corresponding to group-members for a given group
- *
- * @since 1.2
- * @param int $group_id
- * @return string The term slug
- */
-function bp_docs_get_access_term_group_member( $user_id = false ) {
-	return apply_filters( 'bp_docs_get_access_term_group_member', 'bp_docs_access_group_member_' . intval( $user_id ) );
-}
-
-/**
- * Get the access term corresponding to admins-mods for a given group
- *
- * @since 1.2
- * @param int $group_id
- * @return string The term slug
- */
-function bp_docs_get_access_term_group_adminmod( $user_id = false ) {
-	return apply_filters( 'bp_docs_get_access_term_group_adminmod', 'bp_docs_access_group_adminmod_' . intval( $user_id ) );
-}
-
-function bp_docs_update_doc_access( $doc_id, $access_setting = 'anyone' ) {
-
-	$doc = get_post( $doc_id );
-
-	if ( ! $doc || is_wp_error( $doc ) ) {
-		return false;
-	}
-
-	// Convert the access setting to a WP taxonomy term
-	switch ( $access_setting ) {
-		case 'anyone' :
-		case 'loggedin' :
-			$access_term = 'bp_docs_access_' . $access_setting;
-			break;
-
-		case 'group-members' :
-		case 'admins-mods' :
-			$associated_group = bp_docs_get_associated_group_id( $doc_id );
-			$access_term = 'group-members' == $access_setting ? bp_docs_get_access_term_group_member( $associated_group ) : bp_docs_get_access_term_group_adminmod( $associated_group );
-			break;
-
-		case 'creator' :
-		case 'no-one' :
-			// @todo Don't know how these are different
-			$access_term = bp_docs_get_access_term_user( $doc->post_author );
-			break;
-	}
-
-	if ( isset( $access_term ) ) {
-		$retval = wp_set_post_terms( $doc_id, $access_term, bp_docs_get_access_tax_name() );
-	}
-
-	if ( empty( $retval ) || is_wp_error( $retval ) ) {
-		return false;
+	// If this is an existing post, set the ID
+	if ( $doc_id ) {
+		$new_doc_args['ID'] = $doc_id;
 	} else {
-		return true;
+		$new_doc_args['post_author'] = bp_loggedin_user_id();
 	}
 
-}
+	$new_doc_id = wp_insert_post( $new_doc_args );
 
-/* Doc "read comments" access taxonomy terms. *********************************/
-
-/**
- * Get the comment access term for 'anyone'.
- *
- * @since 2.0
- * @return string The term slug
- */
-function bp_docs_get_comment_access_term_anyone() {
-	return apply_filters( 'bp_docs_get_comment_access_term_anyone', 'bp_docs_comment_access_anyone' );
-}
-
-/**
- * Get the comment access term for 'loggedin'.
- *
- * @since 2.0
- * @return string The term slug
- */
-function bp_docs_get_comment_access_term_loggedin() {
-	return apply_filters( 'bp_docs_get_comment_access_term_loggedin', 'bp_docs_comment_access_loggedin' );
-}
-
-/**
- * Get the comment access term for a user id.
- *
- * @since 2.0
- * @param int|bool $user_id Defaults to logged in user
- * @return string The term slug
- */
-function bp_docs_get_comment_access_term_user( $user_id = false ) {
-	if ( false === $user_id ) {
-		$user_id = bp_loggedin_user_id();
+	if ( is_wp_error( $new_doc_id ) ) {
+		bp_core_add_message( __( 'There was an error when saving your Doc.', 'buddypress-docs' ), 'error' );
+		bp_core_redirect( bp_get_root_domain() );
 	}
 
-	return apply_filters( 'bp_docs_get_comment_access_term_user', 'bp_docs_comment_access_user_' . intval( $user_id ) );
-}
+	// Now that the post is saved, add the taxonomy terms
+	bp_docs_update_doc_tax( $new_doc_id, $_POST );
 
-/**
- * Get the comment access term corresponding to group-members for a given group.
- *
- * @since 2.0
- * @param int $group_id
- * @return string The term slug
- */
-function bp_docs_get_comment_access_term_group_member( $user_id = false ) {
-	return apply_filters( 'bp_docs_get_comment_access_term_group_member', 'bp_docs_comment_access_group_member_' . intval( $user_id ) );
-}
+	// And add the access setting meta
+	bp_docs_update_doc_access_setting( $new_doc_id, $_POST );
 
-/**
- * Get the comment access term corresponding to admins-mods for a given group.
- *
- * @since 2.0
- * @param int $group_id
- * @return string The term slug
- */
-function bp_docs_get_comment_access_term_group_adminmod( $user_id = false ) {
-	return apply_filters( 'bp_docs_get_comment_access_term_group_adminmod', 'bp_docs_comment_access_group_adminmod_' . intval( $user_id ) );
-}
-
-/**
- * Update the comment access term for a doc.
- *
- * @since 2.0
- * @param int $group_id
- * @return string The term slug
- */
-function bp_docs_update_doc_comment_access( $doc_id, $access_setting = 'anyone' ) {
-
-	$doc = get_post( $doc_id );
-
-	if ( ! $doc || is_wp_error( $doc ) ) {
-		return false;
-	}
-
-	// Convert the access setting to a WP taxonomy term
-	switch ( $access_setting ) {
-		case 'anyone' :
-			$access_term = bp_docs_get_comment_access_term_anyone();
-			break;
-
-		case 'loggedin' :
-			$access_term = bp_docs_get_comment_access_term_loggedin();
-			break;
-
-		case 'group-members' :
-		case 'admins-mods' :
-			$associated_group = bp_docs_get_associated_group_id( $doc_id );
-			$access_term = 'group-members' == $access_setting ? bp_docs_get_comment_access_term_group_member( $associated_group ) : bp_docs_get_comment_access_term_group_adminmod( $associated_group );
-			break;
-
-		case 'creator' :
-		case 'no-one' :
-			// @todo Don't know how these are different
-			$access_term = bp_docs_get_comment_access_term_user( $doc->post_author );
-			break;
-	}
-
-	if ( isset( $access_term ) ) {
-		$retval = wp_set_post_terms( $doc_id, $access_term, bp_docs_get_comment_access_tax_name() );
-	}
-
-	if ( empty( $retval ) || is_wp_error( $retval ) ) {
-		return false;
+	// Finally, add a post meta to keep track of the associated group, if any.
+	// This helps with template-level stuff where it is expensive to check the taxonomy
+	if ( isset( $_POST['associated_group_id'] ) ) {
+		update_post_meta( $new_doc_id, 'bp_docs_associated_group_id', (int)$_POST['associated_group_id'] );
 	} else {
-		return true;
+		delete_post_meta( $new_doc_id, 'bp_docs_associated_group_id' );
 	}
 
+	do_action( 'bp_docs_doc_saved', $new_doc_id );
+
+	if ( $doc_id ) {
+		bp_core_add_message( __( 'Your Doc was saved successfully.', 'buddypress-docs' ) );
+	} else {
+		bp_core_add_message( __( 'Your Doc was created successfully.', 'buddypress-docs' ) );
+	}
+
+	bp_core_redirect( bp_docs_get_doc_link( $new_doc_id ) );
+}
+add_action( 'bp_actions', 'bp_docs_handle_doc_creation' );
+
+/**
+ * Convenience function for grabbing doc settings.
+ */
+function bp_docs_get_doc_settings( $doc_id ) {
+	return array(
+		'read'    => get_post_meta( $doc_id, 'bp_docs_settings_read', true ),
+		'edit'    => get_post_meta( $doc_id, 'bp_docs_settings_edit', true ),
+		'post_comments'    => get_post_meta( $doc_id, 'bp_docs_settings_post_comments', true ),
+		'view_comments'    => get_post_meta( $doc_id, 'bp_docs_settings_view_comments', true ),
+	);
 }
 
 /**
- * Should 'hide_sitewide' be true for activity items associated with this Doc?
+ * Set the taxonomy terms for a given Doc.
  *
- * We generalize: mark the activity items as 'hide_sitewide' whenever the
- * 'read' setting is something other than 'anyone'.
- * @TODO: Retire this in favor of activity item protection.
+ * @since 1.0-beta
  *
- * Note that this gets overridden by the filter in integration-groups.php in
- * the case of group-associated Docs.
- *
- * @since 1.2.8
- * @param int $doc_id
- * @return bool $hide_sitewide
+ * @param int $doc_id The ID of the doc
+ * @param array $posted_data The $_POST data from the submission form
  */
-function bp_docs_hide_sitewide_for_doc( $doc_id ) {
-	if ( ! $doc_id ) {
-		return false;
+function bp_docs_update_doc_tax( $doc_id, $posted_data ) {
+	global $bp;
+
+	// Doc tags
+	if ( ! empty( $posted_data['doc_tags'] ) ) {
+		// Third argument must be false, or else the terms will be added to, not replaced
+		wp_set_object_terms( $doc_id, $posted_data['doc_tags'], 'bp_docs_tag', false );
+	} else {
+		// No tags have been entered, so let's clear the slate
+		wp_set_object_terms( $doc_id, false, 'bp_docs_tag', false );
 	}
 
-	$settings = bp_docs_get_doc_settings( $doc_id );
-	$hide_sitewide = empty( $settings['read'] ) || 'anyone' != $settings['read'];
-
-	return apply_filters( 'bp_docs_hide_sitewide_for_doc', $hide_sitewide, $doc_id );
+	// Associated group ID
+	if ( isset( $posted_data['associated_group_id'] ) && $posted_data['associated_group_id'] != 'false' ) {
+		wp_set_object_terms( $doc_id, (int)$posted_data['associated_group_id'], $bp->bp_docs->associated_item_tax_name, false );
+	} else {
+		// No group has been selected, so remove all group associations
+		wp_set_object_terms( $doc_id, false, $bp->bp_docs->associated_item_tax_name, false );
+	}
 }
 
-function bp_docs_get_doc_ids_accessible_to_current_user() {
+/**
+ * Updates the post meta that store a doc's access settings.
+ *
+ * @since 1.2
+ */
+function bp_docs_update_doc_access_setting( $doc_id, $posted_data ) {
+	$settings = array( 'read', 'edit', 'post_comments', 'view_comments' );
+	foreach ( $settings as $setting ) {
+		if ( isset( $posted_data['settings'][ $setting ] ) ) {
+			update_post_meta( $doc_id, 'bp_docs_settings_' . $setting, $posted_data['settings'][ $setting ] );
+		}
+	}
+}
+
+/**
+ * Inserts necessary JS and CSS.
+ *
+ * It would be better to use wp_enqueue_scripts, but at that point, the query has already been
+ * parsed, so our is_bp_docs_page() functions do not work. Thus we will use the less efficient
+ * method of checking on bp_actions and then printing in the header. Hey, it's what BP does.
+ *
+ * @since 1.0-beta
+ */
+function bp_docs_enqueue_scripts() {
+	global $bp;
+
+	if ( bp_docs_is_bp_docs_page() ) {
+		wp_enqueue_script( 'bp-docs-js', BP_DOCS_PLUGIN_URL . 'includes/js/bp-docs.js', array( 'jquery' ), BP_DOCS_VERSION );
+		wp_localize_script( 'bp-docs-js', 'bp_docs', array(
+			'please_wait' => __( 'Please wait...', 'buddypress-docs' ),
+			'confirm_delete' => __( 'Are you sure you want to delete this Doc?', 'buddypress-docs' )
+		) );
+
+		wp_enqueue_style( 'bp-docs-css', BP_DOCS_PLUGIN_URL . 'includes/css/screen.css', array(), BP_DOCS_VERSION );
+
+		if ( is_rtl() ) {
+			wp_enqueue_style( 'bp-docs-rtl-css', BP_DOCS_PLUGIN_URL . 'includes/css-rtl/screen-rtl.css', array(), BP_DOCS_VERSION );
+		}
+	}
+
+	if ( bp_docs_is_doc_create() || ( is_singular( $bp->bp_docs->post_type_name ) && bp_is_current_action( 'edit' ) ) ) {
+		wp_enqueue_script( 'bp-docs-edit-js', BP_DOCS_PLUGIN_URL . 'includes/js/edit-validation.js', array( 'jquery', 'bp-docs-js' ), BP_DOCS_VERSION );
+
+		wp_enqueue_style( 'bp-docs-edit-css', BP_DOCS_PLUGIN_URL . 'includes/css/edit.css', array(), BP_DOCS_VERSION );
+
+		if ( is_rtl() ) {
+			wp_enqueue_style( 'bp-docs-edit-rtl-css', BP_DOCS_PLUGIN_URL . 'includes/css-rtl/edit-rtl.css', array(), BP_DOCS_VERSION );
+		}
+
+		wp_enqueue_script( 'jquery-colorbox', BP_DOCS_PLUGIN_URL . 'lib/js/colorbox/jquery.colorbox-min.js', array( 'jquery' ), '1.3.19' );
+		wp_enqueue_script( 'jquery-chosen', BP_DOCS_PLUGIN_URL . 'lib/js/chosen/chosen.jquery.min.js', array( 'jquery' ), '0.9.1' );
+		wp_enqueue_style( 'jquery-chosen-css', BP_DOCS_PLUGIN_URL . 'lib/css/chosen/chosen.min.css', array(), '0.9.1' );
+
+		// Load the idle timer only when edit lock is enabled
+		if ( bp_docs_is_edit_lock_enabled() ) {
+			wp_enqueue_script( 'bp-docs-idle-js', BP_DOCS_PLUGIN_URL . 'includes/js/idle.js', array( 'jquery' ), BP_DOCS_VERSION );
+			wp_localize_script( 'bp-docs-idle-js', 'BP_Docs_Idle_Timers', array(
+				'doc_id' => get_the_ID(),
+				'idle_max' => absint( apply_filters( 'bp_docs_idle_max', 300 ) ), // 5 minutes
+				'idle_away' => absint( apply_filters( 'bp_docs_idle_away', 180 ) ), // 3 minutes
+				'timer_actions' => array( 'focus', 'load', 'mousemove', 'mousedown', 'keypress', 'scroll' ),
+				'wp_interval' => absint( apply_filters( 'heartbeat_settings', array() )['interval'] ),
+			) );
+		}
+	}
+}
+add_action( 'bp_actions', 'bp_docs_enqueue_scripts' );
+
+
+/**
+ * Is this a directory?
+ *
+ * @since 1.0
+ *
+ * @return bool
+ */
+function bp_docs_is_directory() {
+	return bp_is_directory() && bp_is_current_component( BP_DOCS_SLUG );
+}
+
+/**
+ * Takes a list of group IDs and returns a list of docs belonging to those groups.
+ *
+ * @since 1.0
+ *
+ * @param array $group_ids The list of group IDs
+ * @param int $user_id The current user's ID
+ * @return array $docs The doc IDs
+ */
+function bp_docs_get_docs_for_groups( $group_ids, $user_id ) {
+
+	// Right now, this is just a wrapper for a function that does the same thing
+	return BP_Docs_Query::get_docs_for_groups( $group_ids, $user_id );
+}
+
+/**
+ * Is the a standalone (non-group) doc?
+ *
+ * @since 1.0
+ *
+ * @param int $doc_id The doc ID
+ * @return bool $is_standalone
+ */
+function bp_docs_is_standalone_doc( $doc_id ) {
+	$bp = buddypress();
+
+	$terms = wp_get_object_terms( $doc_id, $bp->bp_docs->associated_item_tax_name );
+
+	return apply_filters( 'bp_docs_is_standalone_doc', empty( $terms ) );
+}
+
+/**
+ * Returns a list of the user's docs that are not associated with any groups.
+ *
+ * @since 1.0
+ *
+ * @param array $args
+ * @return array A list of doc objects
+ */
+function bp_docs_get_standalone_docs( $args = array() ) {
+	$bp = buddypress();
+
+	$defaults = array(
+		'author' => bp_loggedin_user_id()
+	);
+	$r = wp_parse_args( $args, $defaults );
+
+	$q = new WP_Query( array(
+		'post_type' => $bp->bp_docs->post_type_name,
+		'author' => $r['author'],
+		'posts_per_page' => -1,
+	) );
+
+	// Have to loop and check taxonomy. Bummer
+	$standalone_docs = array();
+	if ( !empty( $q->posts ) ) {
+		foreach( $q->posts as $doc ) {
+			if ( bp_docs_is_standalone_doc( $doc->ID ) ) {
+				$standalone_docs[] = $doc;
+			}
+		}
+	}
+
+	return $standalone_docs;
+}
+
+/**
+ * When a user is deleted, reassign their docs.
+ *
+ * @since 1.0
+ */
+function bp_docs_reassign_docs_on_user_delete( $user_id, $reassign_user_id ) {
 	global $wpdb;
 
-	// Direct query for speeeeeeed
-	$exclude = bp_docs_access_query()->get_doc_ids();
-	if ( empty( $exclude ) ) {
-		$exclude = array( 0 );
+	$wpdb->update( $wpdb->posts, array( 'post_author' => $reassign_user_id ), array( 'post_author' => $user_id, 'post_type' => buddypress()->bp_docs->post_type_name ) );
+}
+add_action( 'delete_user', 'bp_docs_reassign_docs_on_user_delete', 10, 2 );
+
+/**
+ * Does the current group have docs enabled?
+ *
+ * This function handles all the logic for checking the group settings. As of BP Docs 1.2, docs
+ * are enabled for groups by default. Whether docs can be *created* depends on a separate setting,
+ * managed in {@link bp_docs_get_group_doc_access_setting()}.
+ *
+ * @since 1.1.2
+ *
+ * @param int $group_id The group id. Defaults to the current group.
+ * @return bool $is_enabled True if docs are enabled for the group.
+ */
+function bp_docs_is_docs_enabled_for_group( $group_id = false ) {
+	if ( !$group_id && function_exists( 'bp_get_current_group_id' ) ) {
+		$group_id = bp_get_current_group_id();
 	}
-	$exclude_sql = '(' . implode( ',', $exclude ) . ')';
-	$items_sql = $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_type = %s AND ID NOT IN $exclude_sql", bp_docs_get_post_type_name() );
-	return $wpdb->get_col( $items_sql );
+
+	if ( !$group_id ) {
+		return false;
+	}
+
+	$is_enabled = groups_get_groupmeta( $group_id, 'bp-docs-enabled' );
+
+	if ( '' === $is_enabled ) {
+		$is_enabled = 1;
+	}
+
+	// For legacy groups, look for the 'enable_docs' property on the group object
+	if ( !$is_enabled ) {
+		$group = groups_get_group( array( 'group_id' => $group_id ) );
+		if ( !empty( $group->enable_docs ) ) {
+			$is_enabled = 1;
+		}
+	}
+
+	return apply_filters( 'bp_docs_is_docs_enabled_for_group', (bool)$is_enabled, $group_id );
 }
 
 /**
- * Determine how many revisions to retain for Docs.
+ * Get group doc settings.
+ *
+ * @since 1.2
+ *
+ * @param int $group_id The group id. Defaults to the current group.
+ * @return array Key/value pairs of settings
+ */
+function bp_docs_get_group_doc_settings( $group_id = false ) {
+	if ( !$group_id && function_exists( 'bp_get_current_group_id' ) ) {
+		$group_id = bp_get_current_group_id();
+	}
+
+	if ( !$group_id ) {
+		return false;
+	}
+
+	$settings = groups_get_groupmeta( $group_id, 'bp-docs-settings' );
+
+	if ( empty( $settings ) ) {
+		// Get the default doc settings
+		$settings = bp_docs_get_default_access_options();
+	}
+
+	return apply_filters( 'bp_docs_get_group_doc_settings', $settings, $group_id );
+}
+
+/**
+ * Returns the default doc access options.
+ *
+ * @since 1.2
+ *
+ * @return array Key/value pairs of default options
+ */
+function bp_docs_get_default_access_options() {
+	$defaults = array(
+		'read'          => 'members',
+		'edit'          => 'members',
+		'post_comments' => 'members',
+		'view_comments' => 'members',
+		'create'        => 'members',
+	);
+	return apply_filters( 'bp_docs_get_default_access_options', $defaults );
+}
+
+/**
+ * Locate a template file.
+ *
+ * @since 1.1.5
+ */
+function bp_docs_locate_template( $template_name, $load = false, $require_once = true ) {
+	$template = locate_template( array( 'docs/' . $template_name ), false );
+
+	if ( !$template ) {
+		$template = BP_DOCS_PLUGIN_DIR . 'includes/templates/docs/' . $template_name;
+	}
+
+	if ( $load ) {
+		require $template;
+	} else {
+		return $template;
+	}
+}
+
+/**
+ * When attachments are uploaded, they are by default "unattached". We need to attach them to the
+ * doc post.
+ *
+ * @since 1.1.5
+ *
+ * @param int $attachment_id
+ */
+function bp_docs_add_attachment_parent( $attachment_id ) {
+
+	if ( isset( $_POST['doc_id'] ) ) {
+		$doc_id = intval( $_POST['doc_id'] );
+
+		if ( !empty( $doc_id ) ) {
+			$doc = get_post( $doc_id );
+			if ( !empty( $doc->post_type ) && buddypress()->bp_docs->post_type_name == $doc->post_type ) {
+				wp_update_post( array(
+					'ID'		=> $attachment_id,
+					'post_parent'	=> $doc_id
+				) );
+			}
+		}
+	}
+}
+add_action( 'add_attachment', 'bp_docs_add_attachment_parent' );
+
+/**
+ * When a doc is being edited, we may need to trash some attachments.
+ *
+ * @since 1.1.5
+ */
+function bp_docs_trash_attachment() {
+	if ( !isset( $_POST['attachment_id'] ) )
+		return;
+
+	check_admin_referer( 'bp_docs_remove_attachment' );
+
+	$attachment_id = intval( $_POST['attachment_id'] );
+
+	if ( $attachment_id ) {
+		// A little extra security
+		if ( !current_user_can( 'delete_post', $attachment_id ) )
+			return;
+
+		$trashed = wp_delete_attachment( $attachment_id );
+
+		if ( $trashed ) {
+			bp_core_add_message( __( 'Attachment deleted successfully.', 'buddypress-docs' ) );
+		} else {
+			bp_core_add_message( __( 'There was a problem deleting the attachment.', 'buddypress-docs' ), 'error' );
+		}
+	}
+
+	if ( isset( $_POST['redirect_to'] ) ) {
+		$redirect = $_POST['redirect_to'];
+	} else {
+		$redirect = wp_get_referer();
+	}
+
+	bp_core_redirect( $redirect );
+}
+add_action( 'bp_init', 'bp_docs_trash_attachment' );
+
+/**
+ * Is the currently viewed page the history page for a single doc?
+ *
+ * @since 1.2
+ * @return bool
+ */
+function bp_docs_is_doc_history() {
+	return is_singular( buddypress()->bp_docs->post_type_name ) && bp_is_current_action( BP_DOCS_HISTORY_SLUG );
+}
+
+/**
+ * Is the currently viewed page the edit page for a single doc?
+ *
+ * @since 1.2
+ * @return bool
+ */
+function bp_docs_is_doc_edit() {
+	return is_singular( buddypress()->bp_docs->post_type_name ) && bp_is_current_action( BP_DOCS_EDIT_SLUG );
+}
+
+/**
+ * Adds an 'all' parameter to the bp_has_activities() query string when on a single doc page
+ *
+ * The All tab on single item pages doesn't pick up custom post type activity items. Let's fix
+ * that.
+ *
+ * @since 1.2
+ *
+ * @param str $qs The query string passed to bp_has_activities()
+ * @return str $qs
+ */
+function bp_docs_filter_activity_querystring( $qs ) {
+	if ( is_singular( buddypress()->bp_docs->post_type_name ) ) {
+		$qs .= '&show_hidden=1';
+	}
+	return $qs;
+}
+add_filter( 'bp_dtheme_ajax_querystring', 'bp_docs_filter_activity_querystring' );
+add_filter( 'bp_legacy_theme_ajax_querystring', 'bp_docs_filter_activity_querystring' );
+
+/**
+ * Are edit locks enabled?
+ *
+ * @since 1.2.2
+ * @return bool
+ */
+function bp_docs_is_edit_lock_enabled() {
+	$settings = get_option( 'bp-docs-settings' );
+	$is_enabled = isset( $settings['edit_lock'] ) ? (bool)$settings['edit_lock'] : true;
+	return apply_filters( 'bp_docs_is_edit_lock_enabled', $is_enabled );
+}
+
+/**
+ * Registers widgets.
+ *
+ * @since 1.3
+ */
+function bp_docs_register_widgets() {
+	register_widget( 'WP_Widget_Recent_Docs' );
+}
+add_action( 'widgets_init', 'bp_docs_register_widgets' );
+
+/**
+ * Adds body classes to BP Docs pages.
+ *
+ * @since 1.5
+ * @param array $classes
+ * @return array
+ */
+function bp_docs_body_class( $classes ) {
+	$bp = buddypress();
+
+	if ( is_singular( $bp->bp_docs->post_type_name ) ) {
+		$classes[] = 'bp-docs-single-item';
+	} else if ( bp_docs_is_directory() ) {
+		$classes[] = 'bp-docs-directory';
+	}
+
+	return $classes;
+}
+add_filter( 'body_class', 'bp_docs_body_class' );
+
+/**
+ * Sets up the BP Docs TinyMCE buttons.
+ *
+ * @since 1.8
+ */
+function bp_docs_setup_tinymce() {
+	// Filter for plugins.
+	add_filter( 'mce_external_plugins', 'bp_docs_tinymce_plugins' );
+
+	// Filter for buttons.
+	add_filter( 'mce_buttons', 'bp_docs_tinymce_buttons' );
+}
+
+/**
+ * Load the TinyMCE Doc Link plugin.
  *
  * @since 1.8
  *
- * @return int
+ * @param array $plugins
+ * @return array
  */
-function bp_docs_revisions_to_keep( $num, $post ) {
-	if ( bp_docs_get_post_type_name() !== $post->post_type ) {
-		return $num;
-	}
-
-	if ( defined( 'BP_DOCS_REVISIONS' ) ) {
-		if ( true === BP_DOCS_REVISIONS ) {
-			$num = -1;
-		} else {
-			$num = intval( BP_DOCS_REVISIONS );
-		}
-	}
-
-	return intval( $num );
-}
-add_filter( 'wp_revisions_to_keep', 'bp_docs_revisions_to_keep', 10, 2 );
-
-/**
- * Remove the Docs component from the bp-active-components array.
- *
- * See https://buddypress.trac.wordpress.org/ticket/5552 for the disgusting
- * details.
- */
-function bp_docs_filter_active_components( $components ) {
-	unset( $components['bp_docs'] );
-	return $components;
+function bp_docs_tinymce_plugins( $plugins ) {
+	$plugins['bp_docs_doc_link'] = BP_DOCS_PLUGIN_URL . 'lib/js/tinymce/plugins/doclink/editor_plugin.js';
+	return $plugins;
 }
 
 /**
- * Hook the bp_docs_filter_active_components() filter as close to options_nav rendering as possible.
+ * Add the TinyMCE Doc Link button.
  *
- * @since 1.9
+ * @since 1.8
+ *
+ * @param array $buttons
+ * @return array
  */
-function bp_docs_filter_active_components_hook() {
-	add_filter( 'bp_active_components', 'bp_docs_filter_active_components' );
-}
-add_action( 'bp_before_member_plugin_template', 'bp_docs_filter_active_components_hook' );
-
-/**
- * Unhook the bp_docs_filter_active_components() filter as soon as possible after rendering options_nav.
- *
- * @since 1.9
- */
-function bp_docs_filter_active_components_unhook() {
-	remove_filter( 'bp_active_components', 'bp_docs_filter_active_components' );
-}
-add_action( 'bp_member_plugin_options_nav', 'bp_docs_filter_active_components_unhook' );
-
-/**
- * Calculate the title of the main docs directory.
- *
- * @since 2.0
- *
- * @return string The title to be displayed in the page header.
- */
-function bp_docs_get_docs_directory_title() {
-	$title = get_option( 'bp-docs-directory-title' );
-	if ( empty( $title ) ) {
-		$title = __( 'Docs Directory', 'buddypress-docs' );
-	}
-	return apply_filters( 'bp_docs_directory_title', esc_html( $title ) );
+function bp_docs_tinymce_buttons( $buttons ) {
+	array_push( $buttons, 'separator', 'bp_docs_doc_link' );
+	return $buttons;
 }
 
 /**
- * Wrapper to the BP_Docs_Query->save() method for docs saved via the
- * create/edit screens. Creates an args array from $_POST in the format that
- * BP_Docs_Query->save() expects.
+ * Is this a screen where we should load the editor buttons?
  *
- * @since 1.9
+ * We load on the post edit/add new screens, on the BP Docs edit screen,
+ * and on the front-end group forum topic edit screen.
  *
- * @return array created in BP_Docs_Query->save() {
- *		  @type string $message_type Type of message, success or error.
- *		  @type string $message Text of message to display to user.
- *		  @type string $redirect_url URL to use for redirect after save.
- *		  @type int    $doc_id ID of the updated doc, if applicable.
- *        }
+ * @since 1.8
+ *
+ * @return bool
  */
-function bp_docs_save_doc_via_post() {
-	// Defaults for the array of args that the save() method is expecting:
-	$args = array(
-		'doc_id'       => 0,
-		'title'        => '',
-		'content'      => '',
-		'permalink'    => '',
-		'author_id'    => 0,
-		'group_id'     => null, // Value of null does nothing; 0 will unset existing group association.
-		'is_auto'      => 0,
-		'taxonomies'   => array(),
-		'settings'     => array(),
-		'parent_id'    => 0,
-		'save_context' => 'post_data',
-		'redirect_to'  => 'single',
-	);
+function bp_docs_is_load_editor_buttons() {
+	$retval = false;
 
-	if ( empty( $args['doc_id'] ) && ! empty( $_POST['doc_id'] ) ) {
-		$args['doc_id'] = (int) $_POST['doc_id'];
+	if ( is_admin() && ( in_array( get_current_screen()->base, array( 'post', 'widgets' ) ) ) ) {
+		$retval = true;
+	} else if ( bp_docs_is_doc_create() || bp_docs_is_doc_edit() ) {
+		$retval = true;
+	} else if ( bp_is_group_forum_topic_edit() ) {
+		$retval = true;
 	}
 
-	// Existing Docs have a more specific permission check.
-	if ( $args['doc_id'] && ! current_user_can( 'bp_docs_edit', $args['doc_id'] ) ) {
-		return;
-	} elseif ( ! $args['doc_id'] && ! current_user_can( 'bp_docs_create' ) ) {
-		return;
-	}
-
-	if ( isset( $_POST['doc']['title'] ) ) {
-		$args['title'] = $_POST['doc']['title'];
-	}
-
-	// Using WP editor necessitated the change to $_POST['doc_content'].
-	// Maintain backward compatibility by checking $_POST['doc']['content'] too.
-	if ( isset( $_POST['doc_content'] ) ) {
-		$args['content'] = sanitize_post_field( 'post_content', $_POST['doc_content'], 0, 'db' );
-	} elseif ( isset( $_POST['doc']['content'] ) ) {
-		$args['content'] = sanitize_post_field( 'post_content', $_POST['doc']['content'], 0, 'db' );
-	}
-
-	$args['permalink'] = isset( $_POST['doc']['permalink'] ) ? sanitize_title( $_POST['doc']['permalink'] ) : sanitize_title( $args['title'] );
-
-	$args['author_id'] = bp_loggedin_user_id();
-
-	if ( isset( $_POST['associated_group_id'] ) ) {
-		$args['group_id'] = absint( $_POST['associated_group_id'] );
-	}
-
-	if ( ! empty( $_POST['is_auto'] ) ) {
-		$args['is_auto'] = $_POST['is_auto'];
-	}
-
-	// Calculate terms only if taxonomy addon is active.
-	$args['taxonomies'] = apply_filters( 'bp_docs_prepare_terms_via_post', $args['taxonomies'] );
-
-	if ( ! empty( $_POST['settings'] ) ) {
-		$args['settings'] = $_POST['settings'];
-	}
-
-	// Calculate parent_id only if hierarchy addon is active.
-	$args['parent_id'] = apply_filters( 'bp_docs_get_parent_id_via_post', $args['parent_id'] );
-
-	$args['redirect_to'] = isset( $_POST['doc-edit-submit-continue'] ) ? 'edit' : 'single';
-
-	$instance = new BP_Docs_Query;
-	return $instance->save( $args );
+	return apply_filters( 'bp_docs_is_load_editor_buttons', $retval );
 }
 
 /**
- * Set the 'bp-docs-last-docs-directory' cookie.
+ * Check whether to load the TinyMCE button for inserting Doc links.
  *
- * @since 2.0.0
+ * @since 1.8
  */
-function bp_docs_set_last_docs_directory_cookie() {
-	global $wp;
-
-	if ( ! is_user_logged_in() ) {
-		return;
+function bp_docs_check_load_tinymce_buttons() {
+	if ( bp_docs_is_load_editor_buttons() ) {
+		bp_docs_setup_tinymce();
 	}
+}
+add_action( 'init', 'bp_docs_check_load_tinymce_buttons' );
 
-	$url = home_url( $wp->request );
-
-	if ( isset( $_COOKIE['bp-docs-last-docs-directory'] ) ) {
-		$existing = urldecode( $_COOKIE['bp-docs-last-docs-directory'] );
-		if ( $existing === $url ) {
-			return;
-		}
-	}
-
-	@setcookie( 'bp-docs-last-docs-directory', $url, 0, '/' );
+/**
+ * Get a user's displayname, linked to his profile.
+ *
+ * @since 1.8
+ *
+ * @param int $user_id
+ * @return string
+ */
+function bp_docs_get_user_link( $user_id ) {
+	return '<a href="' . bp_core_get_user_domain( $user_id ) . '">' . bp_core_get_user_displayname( $user_id ) . '</a>';
 }
 
 /**
- * Force unique slugs across all Docs hierarchies.
+ * DigiWuz MSP ENHANCEMENT: Get the display label for a doc status.
  *
- * @since 2.1.0
+ * @param string $status The status slug (eg, 'draft', 'approved').
+ * @return string The display label.
  */
-function bp_docs_force_unique_slugs( $slug, $post_ID, $post_status, $post_type, $post_parent, $original_slug ) {
-	global $wpdb;
+function bp_docs_get_status_label( $status ) {
+    $statuses = array(
+        'draft'    => __( 'Draft', 'buddypress-docs' ),
+        'approved' => __( 'Approved', 'buddypress-docs' ),
+        'rejected' => __( 'Rejected', 'buddypress-docs' ),
+    );
 
-	if ( bp_docs_get_post_type_name() !== $post_type ) {
-		return $slug;
-	}
-
-	$check_sql = "SELECT post_name FROM $wpdb->posts WHERE post_name = %s AND post_type = %s AND ID != %d LIMIT 1";
-	$post_name_check = $wpdb->get_var( $wpdb->prepare( $check_sql, $slug, bp_docs_get_post_type_name(), $post_ID ) );
-
-	if ( ! $post_name_check ) {
-		return $slug;
-	}
-
-	$suffix = 2;
-	do {
-		$alt_post_name = _truncate_post_slug( $original_slug, 200 - ( strlen( $suffix ) + 1 ) ) . "-$suffix";
-		$post_name_check = $wpdb->get_var( $wpdb->prepare( $check_sql, $alt_post_name, $post_type, $post_ID ) );
-		$suffix++;
-	} while ( $post_name_check );
-
-	return $alt_post_name;
+    return isset( $statuses[ $status ] ) ? $statuses[ $status ] : '';
 }
-add_filter( 'wp_unique_post_slug', 'bp_docs_force_unique_slugs', 10, 6 );
-function bp_docs_handle_doc_save() {
-	// ... existing code ...
-	// Nonce check
-	check_admin_referer( 'bp_docs_save_doc' );
 
-	$bp = buddypress();
+/**
+ * DigiWuz MSP ENHANCEMENT: Get and format the history for a given Doc for display.
+ *
+ * @param array $args Arguments for the query.
+ * @return string HTML output of the history list.
+ */
+function bp_docs_get_doc_history_for_display( $args = '' ) {
+    global $wpdb;
 
-	$doc_id = isset( $_POST['doc_id'] ) ? (int) $_POST['doc_id'] : 0;
-	$user_id = bp_loggedin_user_id();
+    $defaults = array(
+        'doc_id' => get_the_ID(),
+    );
+    $r = wp_parse_args( $args, $defaults );
 
-	// Title
-	$title = '';
-	if ( ! empty( $_POST['doc-title'] ) ) {
-		$title = $_POST['doc-title'];
-	}
+    $doc_id = (int) $r['doc_id'];
 
-	// Content
-	$content = '';
-	if ( ! empty( $_POST['doc-content'] ) ) {
-		$content = $_POST['doc-content'];
-	}
-
-	// Associated group
-	$group_id = 0;
-	if ( ! empty( $_POST['bp-docs-associated-group'] ) ) {
-		$group_id = intval( $_POST['bp-docs-associated-group'] );
-	}
-
-	$doc_args = array(
-		'title' 	=> $title,
-		'content' 	=> $content,
-		'doc_id'	=> $doc_id,
-		'group_id'      => $group_id,
-	);
-
-    // ** DigiWuz MSP ENHANCEMENT: Pass category data to the save function **
-    if ( ! empty( $_POST['bp_docs_cat'] ) ) {
-        $doc_args['tax_input'] = array(
-            BP_DOCS_CATEGORY_TAXONOMY => intval( $_POST['bp_docs_cat'] ),
-        );
+    if ( empty( $doc_id ) ) {
+        return '';
     }
 
-	// Save the doc
-	$saved_doc_id = bp_docs_save_doc( $doc_args );
+    $log_table = $wpdb->prefix . 'bp_docs_log';
+    $items = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$log_table} WHERE doc_id = %d ORDER BY date_recorded DESC", $doc_id ) );
 
-	if ( !$saved_doc_id ) {
+    $output = '';
+
+    if ( $items ) {
+        $output = '<ul class="bp-docs-history-list">';
+
+        foreach ( $items as $item ) {
+            $user_link = bp_docs_get_user_link( $item->user_id );
+            $time_since = sprintf( __( '%s ago', 'buddypress-docs' ), bp_core_time_since( strtotime( $item->date_recorded ) ) );
+            $entry = '';
+
+            switch ( $item->action_type ) {
+                case 'created':
+                    $entry = sprintf( __( '%s created this document %s.', 'buddypress-docs' ), $user_link, $time_since );
+                    break;
+                case 'edited':
+                    $entry = sprintf( __( '%s edited this document %s.', 'buddypress-docs' ), $user_link, $time_since );
+                    break;
+                case 'approved':
+                    $entry = sprintf( __( '%s approved this document %s.', 'buddypress-docs' ), $user_link, $time_since );
+                    break;
+                case 'rejected':
+                    $rejection_note = ! empty( $item->extra_data ) ? ' <span class="rejection-note">(' . esc_html( $item->extra_data ) . ')</span>' : '';
+                    $entry = sprintf( __( '%s rejected this document %s.%s', 'buddypress-docs' ), $user_link, $time_since, $rejection_note );
+                    break;
+                case 'deleted':
+                    $entry = sprintf( __( '%s deleted this document %s.', 'buddypress-docs' ), $user_link, $time_since );
+                    break;
+            }
+
+            if ( ! empty( $entry ) ) {
+                $output .= '<li>' . $entry . '</li>';
+            }
+        }
+
+        $output .= '</ul>';
+    } else {
+        $output = '<p>' . __( 'No history found for this document.', 'buddypress-docs' ) . '</p>';
+    }
+
+    return $output;
+}
+
+/**
+ * DigiWuz MSP ENHANCEMENT: Generates a dropdown of Doc Categories.
+ *
+ * @param array $args Arguments for the dropdown.
+ * @return string HTML output for the dropdown.
+ */
+function bp_docs_get_doc_category_dropdown( $args = array() ) {
+	$defaults = array(
+		'taxonomy'        => 'bp_docs_category',
+		'name'            => 'bp_docs_category',
+		'show_option_none' => __( 'Select a category', 'buddypress-docs' ),
+		'hierarchical'    => 1,
+		'echo'            => 0,
+		'selected'        => 0,
+	);
+
+	$r = wp_parse_args( $args, $defaults );
+
+	return wp_dropdown_categories( $r );
+}
+
