@@ -2,7 +2,7 @@
 /*
 Plugin Name: buddypress docs management versioning
 Description: Adds collaborative document management to BuddyPress, with a custom approval workflow and enhanced activity tracking.
-Version: 2.2.0
+Version: 2.2.1
 Author: Boone Gorges (Enhanced by <a href="https://msp.web.id">DigiWuz MSP</a>)
 */
 
@@ -11,13 +11,33 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'BP_DOCS_VERSION', '2.2.0' );
+define( 'BP_DOCS_VERSION', '2.2.1' );
 define( 'BP_DOCS_PLUGIN_SLUG', 'buddypress-docs' );
 define( 'BP_DOCS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BP_DOCS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
 /**
- * Loads BuddyPress Docs.
+ * Main loader function.
+ *
+ * Ensures BuddyPress is active and loads all necessary files.
+ *
+ * @since 2.2.1
+ */
+function bp_docs_loader() {
+	// Checks if BuddyPress is active.
+	if ( ! class_exists( 'BuddyPress' ) ) {
+		// You can add an admin notice here if you like.
+		return;
+	}
+
+	// Load all the plugin files.
+	bp_docs_load();
+}
+add_action( 'bp_include', 'bp_docs_loader' );
+
+
+/**
+ * Includes all the necessary files for the plugin.
  *
  * @since 1.0.0
  */
@@ -51,7 +71,6 @@ function bp_docs_load() {
 		require BP_DOCS_PLUGIN_DIR . 'includes/admin.php';
 	}
 }
-add_action( 'bp_include', 'bp_docs_load' );
 
 /**
  * Sets up the BP Docs component.
@@ -59,6 +78,7 @@ add_action( 'bp_include', 'bp_docs_load' );
  * @since 1.0.0
  */
 function bp_docs_setup_component() {
+	// This function is hooked to 'bp_loaded' which ensures BuddyPress is ready.
 	buddypress()->bp_docs = new BP_Docs_Component();
 }
 add_action( 'bp_loaded', 'bp_docs_setup_component' );
@@ -69,13 +89,23 @@ add_action( 'bp_loaded', 'bp_docs_setup_component' );
  * @since 1.0.0
  */
 function bp_docs_activation() {
-	// Create the post type.
+	// ** FIX for `create_post_type` error **
+	// We manually include the component file and instantiate the class here,
+	// because the 'bp_loaded' hook hasn't fired yet during activation.
+	require_once BP_DOCS_PLUGIN_DIR . 'includes/component.php';
+	if ( ! isset( buddypress()->bp_docs ) ) {
+		buddypress()->bp_docs = new BP_Docs_Component();
+	}
+
+	// Now we can safely call the method.
 	buddypress()->bp_docs->create_post_type();
 
     // ** DigiWuz MSP ENHANCEMENT: Create the custom log table **
+	require_once BP_DOCS_PLUGIN_DIR . 'includes/audit-log.php';
     bp_docs_install_log_table();
 
 	// ** DigiWuz MSP ENHANCEMENT: Register category taxonomy to be available on activation **
+	require_once BP_DOCS_PLUGIN_DIR . 'includes/categories.php';
     bp_docs_register_category_taxonomy();
 
 	// Flush rewrite rules.
