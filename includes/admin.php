@@ -1,347 +1,321 @@
 <?php
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
- * Dashboard functions for BuddyPress Docs
+ * The BP Docs admin class.
  *
  * @package BuddyPressDocs
- * @since 1.1.8
+ * @since 1.2
  */
-
 class BP_Docs_Admin {
 	/**
-	 * Constructor
-	 *
-	 * @since 1.1.8
+	 * Constructor.
 	 */
-	function __construct() {
-		// Replace the Dashboard widget
-		if ( !defined( BP_DOCS_REPLACE_RECENT_COMMENTS_DASHBOARD_WIDGET ) || !BP_DOCS_REPLACE_RECENT_COMMENTS_DASHBOARD_WIDGET ) {
-			add_action( 'wp_dashboard_setup', array( $this, 'replace_recent_comments_dashboard_widget' ) );
-		}
-
-		// Set up menus
-		add_action( 'admin_menu', array( $this, 'setup_menus' ) );
-		add_action( 'admin_menu', array( $this, 'setup_settings' ) );
+	public function __construct() {
+		$this->setup_hooks();
 	}
 
-	public function setup_menus() {
-		// Settings
+	/**
+	 * Sets up hooks.
+	 */
+	public function setup_hooks() {
+		// Replace the Recent Comments dashboard widget with a custom one
+		// We do this at priority 9, so that it can be easily removed by other plugins
+		// ** DigiWuz MSP ENHANCEMENT: Safely check for constant **
+		if ( defined( 'BP_DOCS_REPLACE_RECENT_COMMENTS_DASHBOARD_WIDGET' ) && BP_DOCS_REPLACE_RECENT_COMMENTS_DASHBOARD_WIDGET ) {
+			add_action( 'wp_dashboard_setup', array( $this, 'remove_dashboard_widgets' ), 9 );
+			add_action( 'wp_dashboard_setup', array( $this, 'add_dashboard_widgets' ), 10 );
+		}
+
+		// Edit screen columns
+		add_filter( 'manage_edit-' . buddypress()->bp_docs->post_type_name . '_columns',        array( $this, 'edit_screen_columns' ) );
+		add_action( 'manage_' . buddypress()->bp_docs->post_type_name . '_posts_custom_column', array( $this, 'edit_screen_column_content' ) );
+
+		// Settings page
+		add_action( bp_core_admin_hook(), array( $this, 'admin_menu' ) );
+
+		// Enqueue JS
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
+
+		// AJAX for the associated group autosuggest
+		add_action( 'wp_ajax_bp_docs_admin_get_groups', array( $this, 'ajax_get_groups' ) );
+
+		// ** DigiWuz MSP ENHANCEMENT: Hook in the history page **
+        add_action( 'admin_menu', array( $this, 'add_history_page' ) );
+	}
+
+
+	/** ACTIONS ***************************************************/
+
+	/**
+	 * Removes the dashboard widgets we're going to replace.
+	 */
+	public function remove_dashboard_widgets() {
+		remove_meta_box( 'dashboard_recent_comments', 'dashboard', 'normal' );
+	}
+
+	/**
+	 * Adds our custom dashboard widgets.
+	 */
+	public function add_dashboard_widgets() {
+		wp_add_dashboard_widget( 'dashboard_recent_comments_bp_docs', __( 'Recent Comments on Docs', 'buddypress-docs' ), array( $this, 'dashboard_widget_recent_comments' ) );
+	}
+
+	/**
+	 * Adds the "Docs" item to the BP admin menu.
+	 */
+	public function admin_menu() {
+		// Add our main menu.
+		add_menu_page(
+			__( 'BuddyPress Docs', 'buddypress-docs' ),
+			__( 'Docs', 'buddypress-docs' ),
+			'bp_moderate',
+			'bp-docs-settings',
+			array( $this, 'settings_page' ),
+			'div',
+			28
+		);
+
+		// Add settings submenu.
 		add_submenu_page(
-			'edit.php?post_type=' . bp_docs_get_post_type_name(),
+			'bp-docs-settings',
 			__( 'BuddyPress Docs Settings', 'buddypress-docs' ),
 			__( 'Settings', 'buddypress-docs' ),
 			'bp_moderate',
 			'bp-docs-settings',
-			array( $this, 'settings_cb' )
+			array( $this, 'settings_page' )
 		);
-	}
-
-	public function settings_cb() {
-		?>
-<div class="wrap">
-	<form method="post" action="<?php echo esc_url( admin_url( 'options.php' ) ) ?>">
-		<h2><?php _e( 'BuddyPress Docs Settings', 'buddypress-docs' ) ?></h2>
-		<?php settings_fields( 'bp-docs-settings' ) ?>
-		<?php do_settings_sections( 'bp-docs-settings' ) ?>
-		<?php submit_button() ?>
-	</form>
-</div>
-		<?php
-	}
-
-	public function setup_settings() {
-		// General
-		add_settings_section(
-			'bp-docs-general',
-			__( 'General', 'buddypress-docs' ),
-			array( $this, 'general_section' ),
-			'bp-docs-settings'
-		);
-
-		// General - Docs slug
-		add_settings_field(
-			'bp-docs-slug',
-			__( 'Slug', 'buddypress-docs' ),
-			array( $this, 'slug_setting_markup' ),
-			'bp-docs-settings',
-			'bp-docs-general'
-		);
-		register_setting( 'bp-docs-settings', 'bp-docs-slug', array(
-			'sanitize_callback' => array( $this, 'sanitize_slug' ),
-		) );
-
-		// General - Excerpt length
-		add_settings_field(
-			'bp-docs-excerpt-length',
-			__( 'Directory Excerpt Length', 'buddypress-docs' ),
-			array( $this, 'excerpt_length_setting_markup' ),
-			'bp-docs-settings',
-			'bp-docs-general'
-		);
-		register_setting( 'bp-docs-settings', 'bp-docs-excerpt-length', 'absint' );
-
-		// General - Docs Directory title
-		add_settings_field(
-			'bp-docs-directory-title',
-			__( 'Directory Title', 'buddypress-docs' ),
-			array( $this, 'directory_title_setting_markup' ),
-			'bp-docs-settings',
-			'bp-docs-general'
-		);
-		register_setting( 'bp-docs-settings', 'bp-docs-directory-title', 'sanitize_text_field' );
-
-		// Users
-		add_settings_section(
-			'bp-docs-users',
-			__( 'Users', 'buddypress-docs' ),
-			array( $this, 'users_section' ),
-			'bp-docs-settings'
-		);
-
-		// Users - Tab name
-		add_settings_field(
-			'bp-docs-user-tab-name',
-			__( 'User Tab Name', 'buddypress-docs' ),
-			array( $this, 'user_tab_name_setting_markup' ),
-			'bp-docs-settings',
-			'bp-docs-users'
-		);
-		register_setting( 'bp-docs-settings', 'bp-docs-user-tab-name' );
-
-		// Groups
-		if ( bp_is_active( 'groups' ) ) {
-			add_settings_section(
-				'bp-docs-groups',
-				__( 'Groups', 'buddypress-docs' ),
-				array( $this, 'groups_section' ),
-				'bp-docs-settings'
-			);
-
-			// Groups - Tab name
-			add_settings_field(
-				'bp-docs-tab-name',
-				__( 'Group Tab Name', 'buddypress-docs' ),
-				array( $this, 'group_tab_name_setting_markup' ),
-				'bp-docs-settings',
-				'bp-docs-groups'
-			);
-			register_setting( 'bp-docs-settings', 'bp-docs-tab-name' );
-		}
-
-		// Attachments
-		add_settings_section(
-			'bp-docs-attachments',
-			__( 'Attachments', 'buddypress-docs' ),
-			array( $this, 'attachments_section' ),
-			'bp-docs-settings'
-		);
-
-		// Users - Tab name
-		add_settings_field(
-			'bp-docs-enable-attachments',
-			__( 'Enable Attachments', 'buddypress-docs' ),
-			array( $this, 'enable_attachments_setting_markup' ),
-			'bp-docs-settings',
-			'bp-docs-attachments'
-		);
-		register_setting( 'bp-docs-settings', 'bp-docs-enable-attachments' );
-	}
-
-	public function general_section() { settings_errors(); }
-	public function users_section() {}
-	public function groups_section() {}
-	public function attachments_section() {}
-
-	public function slug_setting_markup() {
-		global $bp;
-
-		$slug = bp_docs_get_docs_slug();
-		$is_in_wp_config = 1 === $bp->bp_docs->slug_defined_in_wp_config['slug'];
-
-		?>
-		<label for="bp-docs-slug" class="screen-reader-text"><?php _e( "Change the slug used to build Docs URLs.", 'buddypress-docs' ) ?></label>
-		<input name="bp-docs-slug" id="bp-docs-slug" type="text" value="<?php echo esc_html( $slug ) ?>" <?php if ( $is_in_wp_config ) : ?>disabled="disabled" <?php endif ?>/>
-		<p class="description"><?php _e( "Change the slug used to build Docs URLs.", 'buddypress-docs' ) ?><?php if ( $is_in_wp_config ) : ?> <?php _e( 'You have already defined this value in <code>wp-config.php</code>, so it cannot be edited here.', 'buddypress-docs' ) ?><?php endif ?></p>
-
-		<?php
-	}
-
-	public function excerpt_length_setting_markup() {
-		$length = bp_docs_get_excerpt_length();
-
-		?>
-		<label for="bp-docs-excerpt-length" class="screen-reader-text"><?php _e( "Change the value for longer or shorter excerpts.", 'buddypress-docs' ) ?></label>
-		<input name="bp-docs-excerpt-length" id="bp-docs-excerpt-length" type="text" value="<?php echo esc_html( $length ) ?>" />
-		<p class="description"><?php _e( "Excerpts are shown on Docs directories, to provide better context. If your theme or language requires longer or shorter excerpts, change this value. Set to <code>0</code> to disable these excerpts.", 'buddypress-docs' ) ?></p>
-
-		<?php
-	}
-
-	public function directory_title_setting_markup() {
-		$label = bp_docs_get_docs_directory_title();
-
-		?>
-		<label for="bp-docs-directory-title" class="screen-reader-text"><?php _e( "Change the title of the main Docs directory.", 'buddypress-docs' ) ?></label>
-		<input name="bp-docs-directory-title" id="bp-docs-directory-title" type="text" value="<?php echo esc_html( $label ); ?>" />
-		<p class="description"><?php _e( "Change the title of the main Docs directory from 'Docs Directory' to whatever you&rsquo;d like.", 'buddypress-docs' ) ?></p>
-
-		<?php
-	}
-
-	public function group_tab_name_setting_markup() {
-		if ( ! bp_is_active( 'groups' ) ) {
-			return;
-		}
-		$name = bp_docs_get_group_tab_name();
-
-		?>
-		<label for="bp-docs-tab-name" class="screen-reader-text"><?php _e( "Change the word on groups' Docs tab.", 'buddypress-docs' ) ?></label>
-		<input name="bp-docs-tab-name" id="bp-docs-tab-name" type="text" value="<?php echo esc_html( $name ) ?>" />
-		<p class="description"><?php _e( "Change the word on the BuddyPress group tab from 'Docs' to whatever you'd like. Keep in mind that this will not change the text anywhere else on the page. For a more thorough text change, create a <a href='http://codex.buddypress.org/extending-buddypress/customizing-labels-messages-and-urls/'>language file</a> for BuddyPress Docs.", 'buddypress-docs' ) ?></p>
-
-		<?php
-	}
-
-	public function user_tab_name_setting_markup() {
-		$name = bp_docs_get_user_tab_name();
-
-		?>
-		<label for="bp-docs-user-tab-name" class="screen-reader-text"><?php _e( "Change the word on users' Docs tab.", 'buddypress-docs' ) ?></label>
-		<input name="bp-docs-user-tab-name" id="bp-docs-user-tab-name" type="text" value="<?php echo esc_html( $name ) ?>" />
-		<p class="description"><?php _e( "Change the word on users' Docs tabs from 'Docs' to whatever you'd like. Keep in mind that this will not change the text anywhere else on the page. For a more thorough text change, create a <a href='http://codex.buddypress.org/extending-buddypress/customizing-labels-messages-and-urls/'>language file</a> for BuddyPress Docs.", 'buddypress-docs' ) ?></p>
-
-		<?php
-	}
-
-	public function enable_attachments_setting_markup() {
-		$enabled = bp_docs_enable_attachments();
-
-		?>
-		<label for="bp-docs-enable-attachments" class="screen-reader-text"><?php _e( "Allow users to add attachments.", 'buddypress-docs' ) ?></label>
-		<select name="bp-docs-enable-attachments" id="bp-docs-enable-attachments">
-			<option value="yes" <?php selected( $enabled, true ) ?>><?php _e( 'Enabled', 'buddypress-docs' ) ?></option>
-			<option value="no" <?php selected( $enabled, false ) ?>><?php _e( 'Disabled', 'buddypress-docs' ) ?></option>
-		</select>
-		<p class="description"><?php _e( "Allow users to add attachments to their Docs.", 'buddypress-docs' ) ?></p>
-
-		<?php
-	}
-
-	public function sanitize_slug( $value ) {
-		$value = rawurlencode( $value );
-
-		add_settings_error( 'bp-docs-settings', 'bp-docs-settings-saved', __( 'Settings updated.', 'buddypress-docs' ), 'updated' );
-
-		return $value;
-	}
-
-	function replace_recent_comments_dashboard_widget() {
-		global $wp_meta_boxes;
-
-		// Find the recent comments widget
-		foreach ( $wp_meta_boxes['dashboard'] as $context => $widgets ) {
-			if ( !empty( $widgets ) && !empty( $widgets['core'] ) && is_array( $widgets['core'] ) && array_key_exists( 'dashboard_recent_comments', $widgets['core'] ) ) {
-				// Take note of the context for when we add our widget
-				$drc_widget_context = $context;
-
-				// Store the widget so that we have access to its information
-				$drc_widget = $widgets['core']['dashboard_recent_comments'];
-
-				// Store the array keys, so that we can reorder things later
-				$widget_order = array_keys( $widgets['core'] );
-
-				// Remove the core widget
-				remove_meta_box( 'dashboard_recent_comments', 'dashboard', $drc_widget_context );
-
-				// No need to continue the loop
-				break;
-			}
-		}
-
-		// If we couldn't find the recent comments widget, it must have been removed. We'll
-		// assume this means we shouldn't add our own
-		if ( empty( $drc_widget ) )
-			return;
-
-		// Set up and add our widget
-		$recent_comments_title = __( 'Recent Comments', 'buddypress-docs' );
-
-		// Add our widget in the same location
-		wp_add_dashboard_widget( 'dashboard_recent_comments_bp_docs', $recent_comments_title, array( $this, 'wp_dashboard_recent_comments' ), 'wp_dashboard_recent_comments_control' );
-
-		// Restore the previous widget order. File this under "good citizenship"
-		$wp_meta_boxes['dashboard'][$context]['core']['dashboard_recent_comments'] = $wp_meta_boxes['dashboard'][$context]['core']['dashboard_recent_comments_bp_docs'];
-
-		unset( $wp_meta_boxes['dashboard'][$context]['core']['dashboard_recent_comments_bp_docs'] );
-
-		// In order to inherit the styles, we're going to spoof the widget ID. Sadness
-		$wp_meta_boxes['dashboard'][$context]['core']['dashboard_recent_comments']['id'] = 'dashboard_recent_comments';
 	}
 
 	/**
-	 * Replicates WP's native recent comments dashboard widget.
+	 * Enqueues admin scripts.
 	 *
-	 * @since 1.1.8
+	 * @param string $hook The page hook.
 	 */
-	function wp_dashboard_recent_comments() {
-		global $wpdb, $bp;
-
-		if ( current_user_can('edit_posts') )
-			$allowed_states = array('0', '1');
-		else
-			$allowed_states = array('1');
-
-		// Select all comment types and filter out spam later for better query performance.
-		$comments = array();
-		$start = 0;
-
-		$widgets = get_option( 'dashboard_widget_options' );
-		$total_items = isset( $widgets['dashboard_recent_comments'] ) && isset( $widgets['dashboard_recent_comments']['items'] )
-			? absint( $widgets['dashboard_recent_comments']['items'] ) : 5;
-
-		while ( count( $comments ) < $total_items && $possible = $wpdb->get_results( "SELECT c.*, p.post_type AS comment_post_post_type FROM $wpdb->comments c LEFT JOIN $wpdb->posts p ON c.comment_post_ID = p.ID WHERE p.post_status != 'trash' ORDER BY c.comment_date_gmt DESC LIMIT $start, 50" ) ) {
-
-			foreach ( $possible as $comment ) {
-				if ( count( $comments ) >= $total_items )
-					break;
-
-				// Is the user allowed to read this doc?
-				if ( $bp->bp_docs->post_type_name == $comment->comment_post_post_type && !bp_docs_user_can( 'read', get_current_user_ID(), $comment->comment_post_ID ) )
-					continue;
-
-				if ( in_array( $comment->comment_approved, $allowed_states ) && current_user_can( 'read_post', $comment->comment_post_ID ) )
-					$comments[] = $comment;
-			}
-
-			$start = $start + 50;
+	public function enqueue_scripts( $hook = '' ) {
+		if ( 'toplevel_page_bp-docs-settings' !== $hook ) {
+			return;
 		}
 
-		if ( $comments ) :
-	?>
-
-			<div id="the-comment-list" class="list:comment">
-	<?php
-			foreach ( $comments as $comment )
-				_wp_dashboard_recent_comments_row( $comment );
-	?>
-
-			</div>
-
-	<?php
-			if ( current_user_can('edit_posts') ) { ?>
-				<?php _get_list_table('WP_Comments_List_Table')->views(); ?>
-	<?php	}
-
-			wp_comment_reply( -1, false, 'dashboard', false );
-			wp_comment_trashnotice();
-
-		else :
-	?>
-
-		<p><?php _e( 'No comments yet.', 'buddypress-docs' ); ?></p>
-
-	<?php
-		endif; // $comments;
+		wp_enqueue_script( 'bp-docs-admin-js', BP_DOCS_PLUGIN_URL . 'includes/js/admin.js', array( 'jquery' ), BP_DOCS_VERSION, true );
+		wp_localize_script( 'bp-docs-admin-js', 'BP_Docs_Admin', array(
+			'associated_group_nonce' => wp_create_nonce( 'bp-docs-admin-associated-group' ),
+		) );
 	}
+
+	/**
+	 * Handles AJAX requests for group name autosuggest.
+	 */
+	public function ajax_get_groups() {
+		check_ajax_referer( 'bp-docs-admin-associated-group' );
+
+		if ( ! isset( $_REQUEST['term'] ) ) {
+			die();
+		}
+
+		$search_terms = $_REQUEST['term'];
+
+		$groups_data = array();
+		if ( bp_has_groups( array( 'search_terms' => $search_terms ) ) ) {
+			while ( bp_groups() ) {
+				bp_the_group();
+				$groups_data[] = array(
+					'id'    => bp_get_group_id(),
+					'label' => bp_get_group_name(),
+				);
+			}
+		}
+
+		echo json_encode( $groups_data );
+		die();
+	}
+
+	/** FILTERS ***************************************************/
+
+	/**
+	 * Filters the columns on the Docs edit screen.
+	 *
+	 * @param array $columns The default columns.
+	 * @return array The filtered columns.
+	 */
+	public function edit_screen_columns( $columns ) {
+		$columns = array(
+			'cb' => '<input type="checkbox" />',
+			'title' => __( 'Title', 'buddypress-docs' ),
+			'author' => __( 'Author', 'buddypress-docs' ),
+			'associated_item' => __( 'Associated Item', 'buddypress-docs' ),
+			'comments' => '<div class="vers"><img alt="Comments" src="' . esc_url( admin_url( 'images/comment-grey-bubble.png' ) ) . '" /></div>',
+			'date' => __( 'Date', 'buddypress-docs' ),
+		);
+
+		return $columns;
+	}
+
+	/** TEMPLATE **************************************************/
+
+	/**
+	 * Fills the content of the custom columns on the Docs edit screen.
+	 *
+	 * @param string $column The column name.
+	 */
+	public function edit_screen_column_content( $column ) {
+		global $post;
+
+		switch ( $column ) {
+			case 'associated_item':
+				if ( bp_docs_doc_is_in_group( $post->ID ) ) {
+					$group_id = bp_docs_get_associated_group_id( $post->ID );
+					$group = groups_get_group( array( 'group_id' => $group_id ) );
+					echo '<a href="' . esc_url( bp_get_group_permalink( $group ) ) . '">' . esc_html( $group->name ) . '</a>';
+				} else {
+					esc_html_e( 'None', 'buddypress-docs' );
+				}
+			break;
+		}
+	}
+
+	/**
+	 * Renders the BP Docs settings page.
+	 */
+	public function settings_page() {
+		$settings = get_option( 'bp-docs-settings', array() );
+
+		if ( isset( $_POST['bp-docs-settings-submit'] ) ) {
+			check_admin_referer( 'bp-docs-settings' );
+
+			$settings['edit_lock'] = ! empty( $_POST['edit-lock-enable'] );
+
+			$associated_group_id = 0;
+			if ( ! empty( $_POST['global-doc-associated-group-id'] ) ) {
+				$associated_group_id = intval( $_POST['global-doc-associated-group-id'] );
+			}
+			$settings['global-doc-associated-group-id'] = $associated_group_id;
+
+			update_option( 'bp-docs-settings', $settings );
+
+			echo '<div id="message" class="updated fade"><p>' . __( 'Settings saved.', 'buddypress-docs' ) . '</p></div>';
+		}
+
+		$edit_lock_enable = isset( $settings['edit_lock'] ) ? (bool) $settings['edit_lock'] : true;
+		$global_doc_associated_group_id = isset( $settings['global-doc-associated-group-id'] ) ? intval( $settings['global-doc-associated-group-id'] ) : 0;
+		if ( $global_doc_associated_group_id ) {
+			$global_doc_associated_group = groups_get_group( array(
+				'group_id' => $global_doc_associated_group_id,
+			) );
+
+			if ( $global_doc_associated_group ) {
+				$global_doc_associated_group_name = $global_doc_associated_group->name;
+			}
+		}
+
+		if ( empty( $global_doc_associated_group_name ) ) {
+			$global_doc_associated_group_name = '';
+		}
+	?>
+		<div class="wrap">
+			<h2><?php esc_html_e( 'BuddyPress Docs Settings', 'buddypress-docs' ) ?></h2>
+
+			<form method="post">
+				<table class="form-table">
+					<tr valign="top">
+						<th scope="row"><?php esc_html_e( 'Edit Locking', 'buddypress-docs' ) ?></th>
+						<td>
+							<label for="edit-lock-enable"><input type="checkbox" name="edit-lock-enable" id="edit-lock-enable" value="1" <?php checked( $edit_lock_enable ) ?> /> <?php esc_html_e( 'Enable edit locking', 'buddypress-docs' ) ?></label>
+							<p class="description"><?php esc_html_e( 'When enabled, only one user will be able to edit a given Doc at a time.', 'buddypress-docs' ) ?></p>
+						</td>
+					</tr>
+					<tr valign="top">
+						<th scope="row"><?php esc_html_e( 'Directory Association', 'buddypress-docs' ) ?></th>
+						<td>
+							<label for="global-doc-associated-group"><?php esc_html_e( 'Select a group to be associated with all Docs in the directory:', 'buddypress-docs' ) ?></label>
+							<p><input type="text" name="global-doc-associated-group" id="global-doc-associated-group" value="<?php echo esc_attr( $global_doc_associated_group_name ) ?>" /></p>
+							<input type="hidden" name="global-doc-associated-group-id" id="global-doc-associated-group-id" value="<?php echo (int) $global_doc_associated_group_id ?>" />
+							<p class="description"><?php esc_html_e( 'By default, Docs created in the main directory are not associated with any group. You may select a group to be used for access control for these Docs. Start typing the name of a group to see a list of matches.', 'buddypress-docs' ) ?></p>
+						</td>
+					</tr>
+				</table>
+
+				<?php wp_nonce_field( 'bp-docs-settings' ) ?>
+				<p class="submit"><input type="submit" name="bp-docs-settings-submit" value="<?php esc_attr_e( 'Save Settings', 'buddypress-docs' ) ?>"></p>
+			</form>
+		</div>
+	<?php
+	}
+
+	/**
+	 * Custom dashboard widget, showing recent comments on docs.
+	 */
+	public function dashboard_widget_recent_comments() {
+		global $wpdb;
+
+		// We have to query the posts table directly, because get_comments() requires that
+		// a post_type be registered
+		$query = $wpdb->prepare( "SELECT c.*, p.post_title FROM {$wpdb->comments} c, {$wpdb->posts} p WHERE p.ID = c.comment_post_ID AND p.post_type = %s AND p.post_status = 'publish' AND c.comment_approved = 1 ORDER BY c.comment_date_gmt DESC LIMIT 5", buddypress()->bp_docs->post_type_name );
+
+		$comments = $wpdb->get_results( $query );
+
+		if ( $comments ) {
+			echo '<ul class="recent-comments-list">';
+			foreach ( $comments as $comment ) {
+				$comment_link = get_comment_link( $comment->comment_ID );
+
+				$author_link = get_comment_author_link( $comment->comment_ID );
+				$post_link = '<a href="' . esc_url( $comment_link ) . '">' . esc_html( $comment->post_title ) . '</a>';
+				$comment_excerpt = get_comment_excerpt( $comment->comment_ID );
+
+				echo '<li>';
+				echo get_avatar( $comment, 50 );
+
+				/* translators: 1: author link, 2: post link, 3: comment excerpt */
+				$list_item = sprintf( __( '%1$s on %2$s: "%3$s"', 'buddypress-docs' ), $author_link, $post_link, $comment_excerpt );
+
+				echo '<p class="recent-comment-meta">' . $list_item . '</p>';
+
+				echo '</li>';
+			}
+			echo '</ul>';
+
+			echo '<ul class="subsubsub"><li><a href="' . esc_url( admin_url( 'edit-comments.php?post_type=' . buddypress()->bp_docs->post_type_name ) ) . '">' . __( 'View all', 'buddypress-docs' ) . '</a></li></ul>';
+
+		} else {
+			echo '<p>' . __( 'No comments yet.', 'buddypress-docs' ) . '</p>';
+		}
+	}
+
+	/**
+     * DigiWuz MSP ENHANCEMENT: Adds the history page to the admin menu.
+     */
+    public function add_history_page() {
+        add_submenu_page(
+            'edit.php?post_type=' . buddypress()->bp_docs->post_type_name,
+            __( 'History Report', 'buddypress-docs' ),
+            __( 'History Report', 'buddypress-docs' ),
+            'manage_options',
+            'bp-docs-history',
+            array( $this, 'render_history_page' )
+        );
+    }
+
+    /**
+     * DigiWuz MSP ENHANCEMENT: Renders the history page content.
+     */
+    public function render_history_page() {
+        require_once BP_DOCS_PLUGIN_DIR . 'includes/admin-history-list-table.php';
+        $list_table = new BP_Docs_History_List_Table();
+        $list_table->prepare_items();
+        ?>
+        <div class="wrap">
+            <h1><?php _e( 'Document History Report', 'buddypress-docs' ); ?></h1>
+            <form id="bp-docs-history-filter" method="get">
+                <input type="hidden" name="post_type" value="<?php echo esc_attr( buddypress()->bp_docs->post_type_name ); ?>" />
+                <input type="hidden" name="page" value="<?php echo esc_attr( $_REQUEST['page'] ); ?>" />
+                <?php $list_table->display(); ?>
+            </form>
+        </div>
+        <?php
+    }
 }
-$bp_docs_admin = new BP_Docs_Admin;
+$bp_docs_admin = new BP_Docs_Admin();
