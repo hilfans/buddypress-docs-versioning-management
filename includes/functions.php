@@ -1216,3 +1216,49 @@ function bp_docs_force_unique_slugs( $slug, $post_ID, $post_status, $post_type, 
 	return $alt_post_name;
 }
 add_filter( 'wp_unique_post_slug', 'bp_docs_force_unique_slugs', 10, 6 );
+function bp_docs_handle_doc_save() {
+	// ... existing code ...
+	// Nonce check
+	check_admin_referer( 'bp_docs_save_doc' );
+
+	$bp = buddypress();
+
+	$doc_id = isset( $_POST['doc_id'] ) ? (int) $_POST['doc_id'] : 0;
+	$user_id = bp_loggedin_user_id();
+
+	// Title
+	$title = '';
+	if ( ! empty( $_POST['doc-title'] ) ) {
+		$title = $_POST['doc-title'];
+	}
+
+	// Content
+	$content = '';
+	if ( ! empty( $_POST['doc-content'] ) ) {
+		$content = $_POST['doc-content'];
+	}
+
+	// Associated group
+	$group_id = 0;
+	if ( ! empty( $_POST['bp-docs-associated-group'] ) ) {
+		$group_id = intval( $_POST['bp-docs-associated-group'] );
+	}
+
+	$doc_args = array(
+		'title' 	=> $title,
+		'content' 	=> $content,
+		'doc_id'	=> $doc_id,
+		'group_id'      => $group_id,
+	);
+
+    // ** DigiWuz MSP ENHANCEMENT: Pass category data to the save function **
+    if ( ! empty( $_POST['bp_docs_cat'] ) ) {
+        $doc_args['tax_input'] = array(
+            BP_DOCS_CATEGORY_TAXONOMY => intval( $_POST['bp_docs_cat'] ),
+        );
+    }
+
+	// Save the doc
+	$saved_doc_id = bp_docs_save_doc( $doc_args );
+
+	if ( !$saved_doc_id ) {
