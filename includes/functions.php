@@ -5,6 +5,24 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * ** DigiWuz MSP ENHANCEMENT: Helper function to get the post type name. **
+ *
+ * This function was created to restore functionality needed by other files
+ * after the main plugin class was refactored.
+ *
+ * @since 2.2.1
+ * @return string The post type name for BuddyPress Docs.
+ */
+function bp_docs_get_post_type_name() {
+    // Ensure the BuddyPress object and the bp_docs component are available.
+    if ( isset( buddypress()->bp_docs->post_type_name ) ) {
+        return buddypress()->bp_docs->post_type_name;
+    }
+    // Fallback just in case, though it should be set by the component.
+    return 'bp_doc';
+}
+
+/**
  * Helper function to determine whether the current page is part of BP Docs
  *
  * @since 1.0-beta
@@ -12,7 +30,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return bool True if the current page is part of BP Docs, otherwise false
  */
 function bp_docs_is_bp_docs_page() {
-	$is_bp_docs_page = ( bp_is_current_component( BP_DOCS_SLUG ) || bp_is_post_type_archive( buddypress()->bp_docs->post_type_name ) || is_singular( buddypress()->bp_docs->post_type_name ) ) ? true : false;
+	$is_bp_docs_page = ( bp_is_current_component( BP_DOCS_SLUG ) || bp_is_post_type_archive( bp_docs_get_post_type_name() ) || is_singular( bp_docs_get_post_type_name() ) ) ? true : false;
 
 	return apply_filters( 'bp_docs_is_bp_docs_page', $is_bp_docs_page );
 }
@@ -484,7 +502,7 @@ function bp_docs_handle_doc_creation() {
 	$new_doc_args = array(
 		'post_title'	=> $_POST['doc_title'],
 		'post_content'	=> $_POST['doc_content'],
-		'post_type'	=> $bp->bp_docs->post_type_name
+		'post_type'	=> bp_docs_get_post_type_name()
 	);
 
 	// If this is an existing post, set the ID
@@ -608,7 +626,7 @@ function bp_docs_enqueue_scripts() {
 		}
 	}
 
-	if ( bp_docs_is_doc_create() || ( is_singular( $bp->bp_docs->post_type_name ) && bp_is_current_action( 'edit' ) ) ) {
+	if ( bp_docs_is_doc_create() || ( is_singular( bp_docs_get_post_type_name() ) && bp_is_current_action( 'edit' ) ) ) {
 		wp_enqueue_script( 'bp-docs-edit-js', BP_DOCS_PLUGIN_URL . 'includes/js/edit-validation.js', array( 'jquery', 'bp-docs-js' ), BP_DOCS_VERSION );
 
 		wp_enqueue_style( 'bp-docs-edit-css', BP_DOCS_PLUGIN_URL . 'includes/css/edit.css', array(), BP_DOCS_VERSION );
@@ -696,7 +714,7 @@ function bp_docs_get_standalone_docs( $args = array() ) {
 	$r = wp_parse_args( $args, $defaults );
 
 	$q = new WP_Query( array(
-		'post_type' => $bp->bp_docs->post_type_name,
+		'post_type' => bp_docs_get_post_type_name(),
 		'author' => $r['author'],
 		'posts_per_page' => -1,
 	) );
@@ -722,7 +740,7 @@ function bp_docs_get_standalone_docs( $args = array() ) {
 function bp_docs_reassign_docs_on_user_delete( $user_id, $reassign_user_id ) {
 	global $wpdb;
 
-	$wpdb->update( $wpdb->posts, array( 'post_author' => $reassign_user_id ), array( 'post_author' => $user_id, 'post_type' => buddypress()->bp_docs->post_type_name ) );
+	$wpdb->update( $wpdb->posts, array( 'post_author' => $reassign_user_id ), array( 'post_author' => $user_id, 'post_type' => bp_docs_get_post_type_name() ) );
 }
 add_action( 'delete_user', 'bp_docs_reassign_docs_on_user_delete', 10, 2 );
 
@@ -843,7 +861,7 @@ function bp_docs_add_attachment_parent( $attachment_id ) {
 
 		if ( !empty( $doc_id ) ) {
 			$doc = get_post( $doc_id );
-			if ( !empty( $doc->post_type ) && buddypress()->bp_docs->post_type_name == $doc->post_type ) {
+			if ( !empty( $doc->post_type ) && bp_docs_get_post_type_name() == $doc->post_type ) {
 				wp_update_post( array(
 					'ID'		=> $attachment_id,
 					'post_parent'	=> $doc_id
@@ -898,7 +916,7 @@ add_action( 'bp_init', 'bp_docs_trash_attachment' );
  * @return bool
  */
 function bp_docs_is_doc_history() {
-	return is_singular( buddypress()->bp_docs->post_type_name ) && bp_is_current_action( BP_DOCS_HISTORY_SLUG );
+	return is_singular( bp_docs_get_post_type_name() ) && bp_is_current_action( BP_DOCS_HISTORY_SLUG );
 }
 
 /**
@@ -908,7 +926,7 @@ function bp_docs_is_doc_history() {
  * @return bool
  */
 function bp_docs_is_doc_edit() {
-	return is_singular( buddypress()->bp_docs->post_type_name ) && bp_is_current_action( BP_DOCS_EDIT_SLUG );
+	return is_singular( bp_docs_get_post_type_name() ) && bp_is_current_action( BP_DOCS_EDIT_SLUG );
 }
 
 /**
@@ -923,7 +941,7 @@ function bp_docs_is_doc_edit() {
  * @return str $qs
  */
 function bp_docs_filter_activity_querystring( $qs ) {
-	if ( is_singular( buddypress()->bp_docs->post_type_name ) ) {
+	if ( is_singular( bp_docs_get_post_type_name() ) ) {
 		$qs .= '&show_hidden=1';
 	}
 	return $qs;
@@ -949,6 +967,8 @@ function bp_docs_is_edit_lock_enabled() {
  * @since 1.3
  */
 function bp_docs_register_widgets() {
+	// ** DigiWuz MSP ENHANCEMENT: Ensure the widget class file is loaded before registering. **
+	require_once BP_DOCS_PLUGIN_DIR . 'includes/class-wp-widget-recent-docs.php';
 	register_widget( 'WP_Widget_Recent_Docs' );
 }
 add_action( 'widgets_init', 'bp_docs_register_widgets' );
@@ -963,7 +983,7 @@ add_action( 'widgets_init', 'bp_docs_register_widgets' );
 function bp_docs_body_class( $classes ) {
 	$bp = buddypress();
 
-	if ( is_singular( $bp->bp_docs->post_type_name ) ) {
+	if ( is_singular( bp_docs_get_post_type_name() ) ) {
 		$classes[] = 'bp-docs-single-item';
 	} else if ( bp_docs_is_directory() ) {
 		$classes[] = 'bp-docs-directory';
