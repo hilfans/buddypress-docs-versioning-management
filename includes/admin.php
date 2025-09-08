@@ -319,3 +319,4 @@ class BP_Docs_Admin {
     }
 }
 $bp_docs_admin = new BP_Docs_Admin();
+
