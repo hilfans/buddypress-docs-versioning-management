@@ -30,9 +30,8 @@ class BP_Docs_Admin {
 			add_action( 'wp_dashboard_setup', array( $this, 'add_dashboard_widgets' ), 10 );
 		}
 
-		// Edit screen columns
-		add_filter( 'manage_edit-' . buddypress()->bp_docs->post_type_name . '_columns',        array( $this, 'edit_screen_columns' ) );
-		add_action( 'manage_' . buddypress()->bp_docs->post_type_name . '_posts_custom_column', array( $this, 'edit_screen_column_content' ) );
+		// ** DigiWuz MSP ENHANCEMENT: Moved to admin_init to avoid loading order issues. **
+		add_action( 'admin_init', array( $this, 'setup_edit_screen_hooks' ) );
 
 		// Settings page
 		add_action( bp_core_admin_hook(), array( $this, 'admin_menu' ) );
@@ -44,7 +43,16 @@ class BP_Docs_Admin {
 		add_action( 'wp_ajax_bp_docs_admin_get_groups', array( $this, 'ajax_get_groups' ) );
 
 		// ** DigiWuz MSP ENHANCEMENT: Hook in the history page **
-        add_action( 'admin_menu', array( $this, 'add_history_page' ) );
+		add_action( 'admin_menu', array( $this, 'add_history_page' ) );
+	}
+
+	/**
+	 * DigiWuz MSP ENHANCEMENT: Setup hooks that need to run later in the admin load process.
+	 */
+	public function setup_edit_screen_hooks() {
+		// Edit screen columns
+		add_filter( 'manage_edit-' . bp_docs_get_post_type_name() . '_columns',        array( $this, 'edit_screen_columns' ) );
+		add_action( 'manage_' . bp_docs_get_post_type_name() . '_posts_custom_column', array( $this, 'edit_screen_column_content' ) );
 	}
 
 
@@ -253,7 +261,7 @@ class BP_Docs_Admin {
 
 		// We have to query the posts table directly, because get_comments() requires that
 		// a post_type be registered
-		$query = $wpdb->prepare( "SELECT c.*, p.post_title FROM {$wpdb->comments} c, {$wpdb->posts} p WHERE p.ID = c.comment_post_ID AND p.post_type = %s AND p.post_status = 'publish' AND c.comment_approved = 1 ORDER BY c.comment_date_gmt DESC LIMIT 5", buddypress()->bp_docs->post_type_name );
+		$query = $wpdb->prepare( "SELECT c.*, p.post_title FROM {$wpdb->comments} c, {$wpdb->posts} p WHERE p.ID = c.comment_post_ID AND p.post_type = %s AND p.post_status = 'publish' AND c.comment_approved = 1 ORDER BY c.comment_date_gmt DESC LIMIT 5", bp_docs_get_post_type_name() );
 
 		$comments = $wpdb->get_results( $query );
 
@@ -278,7 +286,7 @@ class BP_Docs_Admin {
 			}
 			echo '</ul>';
 
-			echo '<ul class="subsubsub"><li><a href="' . esc_url( admin_url( 'edit-comments.php?post_type=' . buddypress()->bp_docs->post_type_name ) ) . '">' . __( 'View all', 'buddypress-docs' ) . '</a></li></ul>';
+			echo '<ul class="subsubsub"><li><a href="' . esc_url( admin_url( 'edit-comments.php?post_type=' . bp_docs_get_post_type_name() ) ) . '">' . __( 'View all', 'buddypress-docs' ) . '</a></li></ul>';
 
 		} else {
 			echo '<p>' . __( 'No comments yet.', 'buddypress-docs' ) . '</p>';
@@ -290,7 +298,7 @@ class BP_Docs_Admin {
      */
     public function add_history_page() {
         add_submenu_page(
-            'edit.php?post_type=' . buddypress()->bp_docs->post_type_name,
+            'edit.php?post_type=' . bp_docs_get_post_type_name(),
             __( 'History Report', 'buddypress-docs' ),
             __( 'History Report', 'buddypress-docs' ),
             'manage_options',
@@ -310,7 +318,7 @@ class BP_Docs_Admin {
         <div class="wrap">
             <h1><?php _e( 'Document History Report', 'buddypress-docs' ); ?></h1>
             <form id="bp-docs-history-filter" method="get">
-                <input type="hidden" name="post_type" value="<?php echo esc_attr( buddypress()->bp_docs->post_type_name ); ?>" />
+                <input type="hidden" name="post_type" value="<?php echo esc_attr( bp_docs_get_post_type_name() ); ?>" />
                 <input type="hidden" name="page" value="<?php echo esc_attr( $_REQUEST['page'] ); ?>" />
                 <?php $list_table->display(); ?>
             </form>
