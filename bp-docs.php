@@ -60,7 +60,7 @@ function bp_docs_load() {
 	require BP_DOCS_PLUGIN_DIR . 'includes/attachments-ajax.php';
 	require BP_DOCS_PLUGIN_DIR . 'includes/shortcode.php';
 	require BP_DOCS_PLUGIN_DIR . 'includes/ajax-validation.php';
-	require BP_DOCS_PLUGIN_DIR . 'includes/class-wp-widget-recent-docs.php';
+	// ** DigiWuz MSP ENHANCEMENT: Widget class is now loaded directly in functions.php where it is registered. **
 
     // ** DigiWuz MSP ENHANCEMENT: Load the new workflow, audit trail, and category files **
     require BP_DOCS_PLUGIN_DIR . 'includes/workflow.php';
