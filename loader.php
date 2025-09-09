@@ -1,11 +1,11 @@
 <?php
 /*
 Plugin Name: BuddyPress Docs
-Plugin URI: http://github.com/boonebgorges/buddypress-docs
-Description: Adds collaborative Docs to BuddyPress
+Plugin URI: https://github.com/hilfans/buddypress-docs-versioning-management/
+Description: Adds advance collaborative Docs to BuddyPress
 Version: 2.2.6
-Author: Boone B Gorges, David Cavins
-Author URI: http://boone.gorg.es
+Author: Boone B Gorges, David Cavins, (Enhanced by <a href="https://msp.web.id">DigiWuz MSP | Hilfan</a>)
+Author URI: https://boone.gorg.es
 Text Domain: buddypress-docs
 Domain Path: /languages/
 Licence: GPLv3
