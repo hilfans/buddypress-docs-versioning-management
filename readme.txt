@@ -1,7 +1,7 @@
 === BuddyPress Docs ===
-Contributors: boonebgorges, cuny-academic-commons, dcavins
-Donate link: http://teleogistic.net/donate
-Tags: buddypress, docs, wiki, documents, collaboration
+Contributors: boonebgorges, cuny-academic-commons, dcavins, hilfans0, telkomuniversity
+Donate link: https://endowment.telkomuniversity.ac.id/donasi-langsung/
+Tags: buddypress, docs, historical, documents, collaboration
 Requires at least: 3.3
 Tested up to: 6.8
 Stable tag: 2.2.6
@@ -607,3 +607,4 @@ This plugin is in active development. For feature requests and bug reports, visi
 
 = 1.2 =
 * Major plugin rewrite. See http://dev.commons.gc.cuny.edu/2012/11/15/buddypress-docs-1-2/ for more details.
+
