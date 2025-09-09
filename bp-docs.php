@@ -1,7 +1,7 @@
 <?php
 /*
-Plugin Name: buddypress docs management versioning
-Description: Adds collaborative document management to BuddyPress, with a custom approval workflow and enhanced activity tracking.
+Plugin Name: Buddypress Docs with Versioning Management
+Description: Adds advance collaborative document management to BuddyPress, with a custom approval workflow and enhanced document tracking history.
 Version: 2.2.1
 Author: Boone Gorges (Enhanced by <a href="https://msp.web.id">DigiWuz MSP</a>)
 */
