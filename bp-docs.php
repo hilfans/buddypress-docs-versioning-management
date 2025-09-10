@@ -1,744 +1,383 @@
 <?php
+/*
+Plugin Name: BuddyPress Docs
+Plugin URI: https://github.com/boonebgorges/buddypress-docs
+Description: Adds collaborative document editing to BuddyPress.
+Version: 2.1.2
+Author: Boone B Gorges, David Cavins, and CUNY Academic Commons
+Author URI: https://github.com/boonebgorges/buddypress-docs
+Text Domain: buddypress-docs
+Domain Path: /languages/
+Licence: GPLv2 or later
+*/
+
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+if ( ! defined( 'BP_DOCS_VERSION' ) ) {
+	define( 'BP_DOCS_VERSION', '2.1.2' );
+}
+
+if ( ! defined( 'BP_DOCS_PLUGIN_SLUG' ) ) {
+	// This is the slug used by the WordPress.org plugin repository.
+	// We may not be in that directory, so we need a constant.
+	define( 'BP_DOCS_PLUGIN_SLUG', 'buddypress-docs' );
+}
 
 /**
- * Main plugin class.
+ * Main BuddyPress Docs class.
  *
- * @package BuddyPressDocs
+ * @package BuddyPress_Docs
  */
 class BP_Docs {
 	/**
-	 * Akismet addon object.
+	 * Singleton instance.
 	 *
-	 * @var BP_Docs_Akismet
+	 * @var BP_Docs
 	 */
-	public $akismet;
+	private static $instance = null;
 
 	/**
-	 * Moderation addon object.
+	 * Post type name.
 	 *
-	 * @var BP_Docs_Moderation
+	 * @var string
 	 */
-	public $moderation;
+	public $post_type_name;
 
 	/**
-	 * WikiText addon object.
+	 * Slug.
 	 *
-	 * @var BP_Docs_Wikitext
+	 * @var string
 	 */
-	public $wikitext;
+	public $slug;
 
 	/**
-	 * History addon object.
+	 * Directory name.
 	 *
-	 * @var BP_Docs_History
+	 * @var string
 	 */
-	public $history;
+	public $name;
 
 	/**
-	 * Hierarchy addon object.
+	 * Component ID.
 	 *
-	 * @var BP_Docs_Hierarchy
+	 * @var string
 	 */
-	public $hierarchy;
+	public $id;
 
 	/**
-	 * Taxonomy addon object.
+	 * Path to the plugin directory.
 	 *
-	 * @var BP_Docs_Taxonomy
+	 * @var string
 	 */
-	public $taxonomy;
-
-	var $post_type_name;
-	var $associated_item_tax_name;
-	var $access_tax_name;
-	var $comment_access_tax_name;
+	public $path;
 
 	/**
-	 * Folders add-on.
+	 * URL to the plugin directory.
 	 *
-	 * @var BP_Docs_Folders
-	 * @since 1.8
+	 * @var string
 	 */
-	var $folders;
+	public $url;
 
 	/**
-	 * PHP 5 constructor
+	 * Admin object.
 	 *
-	 * @since 1.0-beta
+	 * @var BP_Docs_Admin
 	 */
-	function __construct() {
-
-		// Define post type and taxonomy names for use in the register functions
-		$this->post_type_name 		= apply_filters( 'bp_docs_post_type_name', 'bp_doc' );
-		$this->associated_item_tax_name = apply_filters( 'bp_docs_associated_item_tax_name', 'bp_docs_associated_item' );
-		$this->access_tax_name          = apply_filters( 'bp_docs_access_tax_name', 'bp_docs_access' );
-		$this->comment_access_tax_name  = apply_filters( 'bp_docs_comment_access_tax_name', 'bp_docs_comment_access' );
-
-		// :'(
-		wp_cache_add_non_persistent_groups( array( 'bp_docs_nonpersistent' ) );
-
-		// Let plugins know that BP Docs has started loading
-		add_action( 'plugins_loaded',   array( $this, 'load_hook' ), 20 );
-
-		// Load predefined constants first thing
-		add_action( 'bp_docs_load', 	array( $this, 'load_constants' ), 2 );
-
-		// Includes necessary files
-		add_action( 'bp_docs_load', 	array( $this, 'includes' ), 4 );
-
-		// Load the BP Component extension
-		add_action( 'bp_docs_load', 	array( $this, 'do_integration' ), 6 );
-
-		// Load textdomain
-		add_action( 'bp_docs_load',     array( $this, 'load_plugin_textdomain' ) );
-
-		// Let other plugins know that BP Docs has finished initializing
-		add_action( 'bp_init',          array( $this, 'init_hook' ) );
-
-		// Hooks into the 'init' action to register our WP custom post type and tax
-		add_action( 'bp_docs_init',     array( $this, 'register_post_type' ), 2 );
-		add_action( 'bp_docs_init',     array( &$this, 'add_rewrite_tags' ), 4 );
-
-		// Set up doc taxonomy, etc
-		add_action( 'bp_docs_init',     array( $this, 'load_doc_extras' ), 8 );
-
-		// Register AJAX actions.
-		add_action( 'bp_docs_init', array( $this, 'register_ajax_actions' ) );
-
-		// Add rewrite rules
-		add_action( 'generate_rewrite_rules', array( &$this, 'generate_rewrite_rules' ) );
-
-		// parse_query
-		add_action( 'parse_query', array( $this, 'parse_query' ) );
-
-		// Protect doc access
-		add_action( 'template_redirect', array( $this, 'protect_doc_access' ) );
-
-		add_action( 'admin_init', array( $this, 'flush_rewrite_rules' ) );
-	}
+	public $admin;
 
 	/**
-	 * PHP 4 constructor
+	 * Query object.
 	 *
-	 * @since 1.0-beta
+	 * @var BP_Docs_Query
 	 */
-	function bp_docs() {
-		$this->__construct();
-	}
+	public $query;
 
 	/**
-	 * Loads the textdomain for the plugin.
-	 * Language files are used in this order of preference:
-	 *    - WP_LANG_DIR/plugins/buddypress-docs-LOCALE.mo
-	 *    - WP_PLUGIN_DIR/buddypress-docs/languages/buddypress-docs-LOCALE.mo
+	 * Is this a single Doc?
 	 *
-	 * @since 1.0.2
+	 * @var bool
 	 */
-	function load_plugin_textdomain() {
-		/*
-		 * As of WP 4.6, WP has, by this point in the load order, already
-		 * automatically added language files in this location:
-		 * wp-content/languages/plugins/buddypress-docs-es_ES.mo
-		 * load_plugin_textdomain() also looks for language files in that location,
-		 * then it falls back to translations in the plugin's /languages folder, like
-		 * wp-content/buddypress-docs/languages/buddypress-docs-es_ES.mo
-		 */
-		load_plugin_textdomain( 'buddypress-docs', false, plugin_basename( dirname( __FILE__ ) ) . '/languages' );
-	}
+	public $is_single;
 
 	/**
-	 * Includes files needed by BuddyPress Docs
+	 * The current Doc object.
 	 *
-	 * @since 1.0-beta
+	 * @var WP_Post
 	 */
-	function includes() {
-
-		// functions.php includes miscellaneous utility functions used throughout
-		require( BP_DOCS_INCLUDES_PATH . 'functions.php' );
-
-		// component.php extends BP_Component, and does most of the basic setup for BP Docs
-		require( BP_DOCS_INCLUDES_PATH . 'component.php' );
-
-		// caps.php handles capabilities and roles
-		require( BP_DOCS_INCLUDES_PATH . 'caps.php' );
-
-		// access-query.php is a helper for determining access to docs
-		require( BP_DOCS_INCLUDES_PATH . 'access-query.php' );
-
-		// query-builder.php contains the class that fetches the content for each view
-		require( BP_DOCS_INCLUDES_PATH . 'query-builder.php' );
-
-		// templatetags.php has all functions in the global space available to templates
-		require( BP_DOCS_INCLUDES_PATH . 'templatetags.php' );
-
-		require( BP_DOCS_INCLUDES_PATH . 'templatetags-edit.php' );
-
-		require( BP_DOCS_INCLUDES_PATH . 'attachments.php' );
-
-		require( BP_DOCS_INCLUDES_PATH . 'ajax-validation.php' );
-
-		require( BP_DOCS_INCLUDES_PATH . 'theme-bridge.php' );
-
-		require( BP_DOCS_INCLUDES_PATH . 'edit-lock.php' );
-
-		// formatting.php contains filters and functions used to modify appearance only
-		require( BP_DOCS_INCLUDES_PATH . 'formatting.php' );
-
-		// class-wp-widget-recent-docs.php adds a widget to show recently created docs.
-		require( BP_DOCS_INCLUDES_PATH . 'class-wp-widget-recent-docs.php' );
-
-		// class-wp-widget-recent-docs.php adds a widget to show recently created docs.
-		require( BP_DOCS_INCLUDES_PATH . 'shortcode.php' );
-
-		// Dashboard-specific functions
-		if ( is_admin() ) {
-			require( BP_DOCS_INCLUDES_PATH . 'admin.php' );
-			require( BP_DOCS_INCLUDES_PATH . 'upgrade.php' );
-		}
-	}
+	public $current_doc;
 
 	/**
-	 * Defines bp_docs_load action
+	 * The current Doc ID.
 	 *
-	 * This action fires on WP's plugins_loaded action and provides a way for the rest of
-	 * BuddyPress Docs, as well as other dependent plugins, to hook into the loading process in
-	 * an orderly fashion.
-	 *
-	 * @since 1.2
+	 * @var int
 	 */
-	function load_hook() {
-		do_action( 'bp_docs_load' );
-	}
+	public $current_doc_id;
 
 	/**
-	 * Defines bp_docs_init action
+	 * The current item ID (user or group).
 	 *
-	 * This action fires on WP's init action and provides a way for the rest of BuddyPress
-	 * Docs, as well as other dependent plugins, to hook into the loading process in an
-	 * orderly fashion.
-	 *
-	 * @since 1.0-beta
+	 * @var int
 	 */
-	function init_hook() {
-		do_action( 'bp_docs_init' );
-	}
+	public $current_item_id;
 
 	/**
-	 * Defines bp_docs_loaded action
+	 * Is this a directory?
 	 *
-	 * This action tells BP Docs and other plugins that the main initialization process has
-	 * finished.
-	 *
-	 * @since 1.0-beta
+	 * @var bool
 	 */
-	function loaded() {
-		do_action( 'bp_docs_loaded' );
-	}
+	public $is_directory;
 
 	/**
-	 * Defines constants needed throughout the plugin.
+	 * Is this a user's Docs page?
 	 *
-	 * These constants can be overridden in bp-custom.php or wp-config.php.
-	 *
-	 * @since 1.0-beta
+	 * @var bool
 	 */
-	function load_constants() {
-		if ( ! defined( 'BP_DOCS_PLUGIN_SLUG' ) ) {
-			define( 'BP_DOCS_PLUGIN_SLUG', 'buddypress-docs' );
+	public $is_user_docs;
+
+	/**
+	 * Static method to get singleton instance.
+	 *
+	 * @return BP_Docs
+	 */
+	public static function &instance() {
+		if ( is_null( self::$instance ) ) {
+			self::$instance = new self();
 		}
 
-		// You should never really need to override this bad boy
-		if ( !defined( 'BP_DOCS_INSTALL_PATH' ) ) {
-			define( 'BP_DOCS_INSTALL_PATH', plugin_dir_path( __FILE__ ) );
-		}
-
-		// Ditto
-		if ( !defined( 'BP_DOCS_INCLUDES_PATH' ) )
-			define( 'BP_DOCS_INCLUDES_PATH', BP_DOCS_INSTALL_PATH . 'includes/' );
-
-		// Ditto^2. For deprecated files, we need a non-system path. Note: doesn't work
-		// right with symlinks
-		if ( !defined( 'BP_DOCS_INCLUDES_PATH_ABS' ) )
-			define( 'BP_DOCS_INCLUDES_PATH_ABS', str_replace( ABSPATH, '', BP_DOCS_INCLUDES_PATH ) );
-
-		// The slug used when viewing a doc category
-		if ( !defined( 'BP_DOCS_CATEGORY_SLUG' ) )
-			define( 'BP_DOCS_CATEGORY_SLUG', 'category' );
-
-		// The slug used when editing a doc
-		if ( !defined( 'BP_DOCS_EDIT_SLUG' ) )
-			define( 'BP_DOCS_EDIT_SLUG', 'edit' );
-
-		// The slug used when viewing doc histor
-		if ( !defined( 'BP_DOCS_HISTORY_SLUG' ) )
-			define( 'BP_DOCS_HISTORY_SLUG', 'history' );
-
-		// The slug used when viewing a single doc
-		if ( !defined( 'BP_DOCS_SINGLE_SLUG' ) )
-			define( 'BP_DOCS_SINGLE_SLUG', 'single' );
-
-		// The slug used when creating a new doc
-		if ( !defined( 'BP_DOCS_CREATE_SLUG' ) )
-			define( 'BP_DOCS_CREATE_SLUG', 'create' );
-
-		// The slug used when deleting a doc
-		if ( !defined( 'BP_DOCS_DELETE_SLUG' ) )
-			define( 'BP_DOCS_DELETE_SLUG', 'delete' );
-
-		// The slug used when deleting a doc
-		if ( !defined( 'BP_DOCS_UNTRASH_SLUG' ) )
-			define( 'BP_DOCS_UNTRASH_SLUG', 'untrash' );
-
-		// The slug used when removing a doc from a group
-		if ( ! defined( 'BP_DOCS_UNLINK_FROM_GROUP_SLUG' ) )
-			define( 'BP_DOCS_UNLINK_FROM_GROUP_SLUG', 'unlink-from-group' );
-
-		// The slug used for the Started section of My Docs
-		if ( !defined( 'BP_DOCS_STARTED_SLUG' ) )
-			define( 'BP_DOCS_STARTED_SLUG', 'started' );
-
-		// The slug used for the Edited section of My Docs
-		if ( !defined( 'BP_DOCS_EDITED_SLUG' ) )
-			define( 'BP_DOCS_EDITED_SLUG', 'edited' );
-
-		// The slug used for 'my-docs'
-		if ( !defined( 'BP_DOCS_MY_DOCS_SLUG' ) )
-			define( 'BP_DOCS_MY_DOCS_SLUG', 'my-docs' );
-
-		// The slug used for 'my-groups'
-		if ( !defined( 'BP_DOCS_MY_GROUPS_SLUG' ) )
-			define( 'BP_DOCS_MY_GROUPS_SLUG', 'my-groups' );
-
-		// By default, BP Docs will replace the Recent Comments WP Dashboard Widget
-		if ( !defined( 'BP_DOCS_REPLACE_RECENT_COMMENTS_DASHBOARD_WIDGET' ) )
-			define( 'BP_DOCS_REPLACE_RECENT_COMMENTS_DASHBOARD_WIDGET', true );
+		return self::$instance;
 	}
 
 	/**
-	 * Registers BuddyPress Docs's post types and taxonomies
-	 *
-	 * The post type bp_doc corresponds to individual doc page, which in turn corresponds to
-	 * individual WP posts (plus their revisions).
-	 *
-	 * The taxonomy bp_docs_associated_item is a hierarchical taxonomy that connects bp_doc
-	 * items to groups. The parent terms 'groups' and 'users' are created automatically when
-	 * first doc corresponding to that item type is created. Individual item ids, like
-	 * group_ids or user_ids, have taxonomy item created for them (if necessary) when a doc
-	 * needs to be associated with them. So a bp_doc post associated with group 6 will have
-	 * the taxonomy bp_docs_associated_item '6', where '6' is a sub-tax of 'groups'.
-	 *
-	 * @since 1.0-beta
+	 * Constructor.
 	 */
-	function register_post_type() {
-		// Only register on the root blog
-		if ( !bp_is_root_blog() )
-			switch_to_blog( BP_ROOT_BLOG );
+	public function __construct() {
+		// Don't do anything until BP is loaded.
+		add_action( 'bp_include', array( $this, 'init' ) );
+	}
 
-		// Define the labels to be used by the post type bp_doc
-		$post_type_labels = array(
-			'name' 		     => _x( 'Docs', 'post type general name', 'buddypress-docs' ),
-			'singular_name'      => _x( 'Doc', 'post type singular name', 'buddypress-docs' ),
-			'add_new' 	     => _x( 'Add New', 'add new', 'buddypress-docs' ),
-			'add_new_item' 	     => __( 'Add New Doc', 'buddypress-docs' ),
-			'edit_item' 	     => __( 'Edit Doc', 'buddypress-docs' ),
-			'new_item' 	     => __( 'New Doc', 'buddypress-docs' ),
-			'view_item' 	     => __( 'View Doc', 'buddypress-docs' ),
-			'search_items' 	     => __( 'Search Docs', 'buddypress-docs' ),
-			'not_found' 	     =>  __( 'No Docs found', 'buddypress-docs' ),
-			'not_found_in_trash' => __( 'No Docs found in Trash', 'buddypress-docs' ),
-			'parent_item_colon'  => ''
-		);
+	/**
+	 * Main initialization method.
+	 */
+	public function init() {
+		$this->setup_globals();
+		$this->includes();
+		$this->setup_hooks();
+		$this->register_post_type();
+	}
 
-		// Set up the arguments to be used when the post type is registered
-		// Only filter this if you are hella smart and/or know what you're doing
-		$bp_docs_post_type_args = apply_filters( 'bp_docs_post_type_args', array(
-			'label'        => __( 'Docs', 'buddypress-docs' ),
-			'labels'       => $post_type_labels,
-			'public'       => true,
-			'show_ui'      => $this->show_cpt_ui(),
-			'hierarchical' => true,
-			'supports'     => array( 'title', 'editor', 'revisions', 'excerpt', 'comments', 'author' ),
-			'query_var'    => true,
-			'has_archive'  => true,
-			'rewrite'      => array(
-				'slug'       => bp_docs_get_docs_slug(),
-				'with_front' => false
+	/**
+	 * Set up globals.
+	 *
+	 * @since 1.9.0
+	 */
+	private function setup_globals() {
+		$this->id           = 'docs';
+		$this->post_type_name = apply_filters( 'bp_docs_post_type_name', 'bp_doc' );
+		$this->slug         = apply_filters( 'bp_docs_slug', 'docs' );
+		$this->name         = apply_filters( 'bp_docs_name', __( 'Docs', 'buddypress-docs' ) );
+		$this->path         = plugin_dir_path( __FILE__ );
+		$this->url          = plugin_dir_url( __FILE__ );
+	}
+
+	/**
+	 * Includes.
+	 *
+	 * @since 1.9.0
+	 */
+	private function includes() {
+		// Functions.
+		require $this->path . 'includes/functions.php';
+		require $this->path . 'includes/formatting.php';
+		require $this->path . 'includes/admin.php';
+		require $this->path . 'includes/caps.php';
+		require $this->path . 'includes/activity.php';
+		require $this->path . 'includes/theme-bridge.php';
+		require $this->path . 'includes/templatetags.php';
+		require $this->path . 'includes/templatetags-edit.php';
+		require $this->path . 'includes/ajax-validation.php';
+		require $this->path . 'includes/shortcode.php';
+		require $this->path . 'includes/edit-lock.php';
+		require $this->path . 'includes/access-query.php';
+		require $this->path . 'includes/query-builder.php';
+		require $this->path . 'includes/upgrade.php';
+		require $this->path . 'includes/class-wp-widget-recent-docs.php';
+
+		// Addons.
+		require $this->path . 'includes/addon-history.php';
+		require $this->path . 'includes/addon-folders.php';
+		require $this->path . 'includes/addon-taxonomy.php';
+		require $this->path . 'includes/addon-hierarchy.php';
+		require $this->path . 'includes/addon-akismet.php';
+		require $this->path . 'includes/addon-wikitext.php';
+		require $this->path . 'includes/addon-moderation.php';
+		require $this->path . 'includes/addon-categories.php';
+
+		// Integrations.
+		require $this->path . 'includes/integration-bp.php';
+
+		// Attachments need to load fairly early for UI reasons.
+		require $this->path . 'includes/attachments.php';
+		require $this->path . 'includes/attachments-ajax.php';
+	}
+
+	/**
+	 * Set up hooks.
+	 *
+	 * @since 1.9.0
+	 */
+	private function setup_hooks() {
+		// i18n.
+		add_action( 'bp_init', array( $this, 'load_textdomain' ), 7 );
+
+		// Enqueue JS and CSS.
+		add_action( 'bp_docs_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
+
+		// Register the widget.
+		add_action( 'widgets_init', array( $this, 'register_widget' ) );
+	}
+
+	/**
+	 * Load the textdomain.
+	 */
+	public function load_textdomain() {
+		$domain = 'buddypress-docs';
+		$locale = apply_filters( 'plugin_locale', get_locale(), $domain );
+		load_textdomain( $domain, WP_LANG_DIR . '/' . $domain . '/' . $domain . '-' . $locale . '.mo' );
+		load_plugin_textdomain( $domain, false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+	}
+
+	/**
+	 * Enqueue CSS and JavaScript.
+	 */
+	public function enqueue_scripts() {
+
+		// CSS.
+		wp_enqueue_style( 'bp-docs-css', $this->url . 'includes/css/screen.css', array(), BP_DOCS_VERSION );
+		wp_enqueue_style( 'bp-docs-font-css', $this->url . 'includes/css/bp-docs.css', array(), BP_DOCS_VERSION );
+
+		if ( is_rtl() ) {
+			wp_enqueue_style( 'bp-docs-rtl-css', $this->url . 'includes/css-rtl/screen-rtl.css', array( 'bp-docs-css' ), BP_DOCS_VERSION );
+		}
+
+		// JavaScript.
+		wp_enqueue_script( 'bp-docs-js', $this->url . 'includes/js/bp-docs.js', array( 'jquery' ), BP_DOCS_VERSION, true );
+		wp_enqueue_script( 'bp-docs-idle-js', $this->url . 'includes/js/idle.js', array( 'jquery' ), BP_DOCS_VERSION, true );
+		wp_enqueue_script( 'bp-docs-attachments', $this->url . 'includes/js/attachments.js', array( 'jquery' ), BP_DOCS_VERSION, true );
+		wp_enqueue_script( 'jquery-color' ); // For animations.
+
+		if ( bp_docs_is_doc_edit() || bp_docs_is_doc_create() ) {
+			wp_enqueue_script( 'bp-docs-edit-validation', $this->url . 'includes/js/edit-validation.js', array( 'jquery' ), BP_DOCS_VERSION, true );
+
+			wp_localize_script(
+				'bp-docs-js',
+				'BP_Docs_Edit_Settings',
+				array(
+					'lock_ttl'        => bp_docs_get_lock_ttl(),
+					'user_can_autosave' => current_user_can( 'bp_docs_edit' ),
+					'is_new_doc'      => ! bp_docs_is_existing_doc(),
+				)
+			);
+		}
+
+		wp_localize_script(
+			'bp-docs-js',
+			'BP_Docs_Strings',
+			array(
+				'ays_delete_doc'             => __( 'Are you sure you want to delete this Doc?', 'buddypress-docs' ),
+				'ays_delete_folder'          => __( 'Are you sure you want to delete this folder? All Docs in the folder will be moved to the root folder.', 'buddypress-docs' ),
+				'ays_delete_attachment'      => __( 'Are you sure you want to delete this attachment?', 'buddypress-docs' ),
+				'ays_cancel_edit'            => __( 'Are you sure you want to cancel your edits? Any changes you have made will be lost.', 'buddypress-docs' ),
+				'validation_error'           => __( 'There was an error with your submission. Please check the form and try again.', 'buddypress-docs' ),
+				'doc_saved'                  => __( 'Doc saved.', 'buddypress-docs' ),
+				'doc_autosaved'              => __( 'Doc autosaved.', 'buddypress-docs' ),
+				'saving'                     => __( 'Saving...', 'buddypress-docs' ),
+				'program_error'              => __( 'A program error has occurred. Please try again.', 'buddypress-docs' ),
+				'move_to_folder'             => __( 'Move to Folder', 'buddypress-docs' ),
+				'show_all_folders'           => __( 'Show all folders', 'buddypress-docs' ),
+				'hide_all_folders'           => __( 'Hide all folders', 'buddypress-docs' ),
+				'comment_warning'            => __( 'Please enter a comment.', 'buddypress-docs' ),
+				'folder_name_warning'        => __( 'Please enter a folder name.', 'buddypress-docs' ),
+				'saving_time_warning'        => __( 'The Doc was last saved at', 'buddypress-docs' ),
+				'session_length'             => '14400',
+				'admin_url'                  => admin_url(),
+				'leaving_editor_warning'     => __( 'Leaving this page will delete all unsaved changes.', 'buddypress-docs' ),
+				'still_working'              => __( 'Are you still working?', 'buddypress-docs' ),
+				'session_expired_title'      => __( 'Session Expired', 'buddypress-docs' ),
+				'session_expired_text'       => __( 'Your session has expired. You will be redirected to the login page.', 'buddypress-docs' ),
+				'attachment_requires_title'  => __( 'Please give your attachment a title.', 'buddypress-docs' ),
+				'attachment_requires_file'   => __( 'Please choose a file to upload.', 'buddypress-docs' ),
+				'get_docs_for_item_nonce'    => wp_create_nonce( 'bp-docs-get-docs-for-item' ),
+				'toggle_access_setting_nonce' => wp_create_nonce( 'bp-docs-toggle-access-setting' ),
 			)
-		) );
+		);
+	}
 
-		// Register the bp_doc post type
-		register_post_type( $this->post_type_name, $bp_docs_post_type_args );
+	/**
+	 * Register the post type for Docs.
+	 */
+	public function register_post_type() {
 
-		// Define the labels to be used by the taxonomy bp_docs_associated_item
-		$associated_item_labels = array(
-			'name'          => __( 'Associated Items', 'buddypress-docs' ),
-			'singular_name' => __( 'Associated Item', 'buddypress-docs' )
+		$bp = buddypress();
+
+		$labels = array(
+			'name'               => _x( 'Docs', 'post type general name', 'buddypress-docs' ),
+			'singular_name'      => _x( 'Doc', 'post type singular name', 'buddypress-docs' ),
+			'add_new'            => __( 'Add New', 'buddypress-docs' ),
+			'add_new_item'       => __( 'Add New Doc', 'buddypress-docs' ),
+			'edit_item'          => __( 'Edit Doc', 'buddypress-docs' ),
+			'new_item'           => __( 'New Doc', 'buddypress-docs' ),
+			'all_items'          => __( 'All Docs', 'buddypress-docs' ),
+			'view_item'          => __( 'View Doc', 'buddypress-docs' ),
+			'search_items'       => __( 'Search Docs', 'buddypress-docs' ),
+			'not_found'          => __( 'No docs found', 'buddypress-docs' ),
+			'not_found_in_trash' => __( 'No docs found in Trash', 'buddypress-docs' ),
+			'parent_item_colon'  => '',
+			'menu_name'          => __( 'BuddyPress Docs', 'buddypress-docs' ),
 		);
 
-		// Register the bp_docs_associated_item taxonomy
-		register_taxonomy( $this->associated_item_tax_name, array( $this->post_type_name ), array(
-			'labels'       => $associated_item_labels,
-			'hierarchical' => true,
-			'public'       => false,
-			'show_ui'      => false,
-		) );
-
-		// Register the bp_docs_access taxonomy
-		register_taxonomy( $this->access_tax_name, array( $this->post_type_name ), array(
-			'hierarchical' => false,
-			'public'       => false,
-			'show_ui'      => false,
-		) );
-
-		// Register the bp_docs_comment_access taxonomy.
-		register_taxonomy( $this->comment_access_tax_name, array( $this->post_type_name ), array(
-			'hierarchical' => false,
-			'public'       => false,
-			'show_ui'      => false,
-		) );
-
-		do_action( 'bp_docs_registered_post_type' );
-
-		// Only register on the root blog
-		if ( !bp_is_root_blog() )
-			restore_current_blog();
-	}
-
-
-	/**
-	 * Loads the file that enables the use of extras (doc taxonomy, hierarchy, etc)
-	 *
-	 * This is loaded conditionally, so that the use of extras can be disabled by the
-	 * administrator. It is loaded before the bp_docs post type is registered so that we have
-	 * access to the 'taxonomy' argument of register_post_type.
-	 *
-	 * @since 1.0-beta
-	 */
-	function load_doc_extras() {
-		// Todo: make this conditional with a filter or a constant
-		require_once( BP_DOCS_INCLUDES_PATH . 'addon-taxonomy.php' );
-		$this->taxonomy = new BP_Docs_Taxonomy;
-
-		require_once( BP_DOCS_INCLUDES_PATH . 'addon-hierarchy.php' );
-		$this->hierarchy = new BP_Docs_Hierarchy;
-
-		// Don't load the History component if post revisions are disabled
-		$wp_post_revisions = defined( 'WP_POST_REVISIONS' ) && WP_POST_REVISIONS;
-		$bp_docs_revisions = defined( 'BP_DOCS_REVISIONS' ) && BP_DOCS_REVISIONS;
-		if ( $wp_post_revisions || $bp_docs_revisions ) {
-			require_once( BP_DOCS_INCLUDES_PATH . 'addon-history.php' );
-			$this->history = new BP_Docs_History;
-		}
-
-		// Load the wikitext addon
-		require_once( BP_DOCS_INCLUDES_PATH . 'addon-wikitext.php' );
-		$this->wikitext = new BP_Docs_Wikitext;
-
-		// Load the Folders addon
-		require_once( BP_DOCS_INCLUDES_PATH . 'addon-folders.php' );
-		$this->folders = new BP_Docs_Folders();
-
-		// Load Akismet support if Akismet is configured and desired.
-		/**
-		 * Should we apply Akismet filtration to BuddyPress Docs content?
-		 *
-		 * @since 2.1.0
-		 *
-		 * @param bool $use Whether we want to use Akismet for BP Docs.
-		 */
-		if ( apply_filters( 'bp_docs_use_akismet', true ) && defined( 'AKISMET_VERSION' ) && class_exists( 'Akismet' ) ) {
-			$wordpress_api_key = bp_get_option( 'wordpress_api_key' );
-			if ( ! empty( $wordpress_api_key ) || defined( 'WPCOM_API_KEY' ) ) {
-				require_once( BP_DOCS_INCLUDES_PATH . 'addon-akismet.php' );
-				$this->akismet = new BP_Docs_Akismet();
-				$this->akismet->add_hooks();
-			}
-		}
-
-		// Load the Moderation addon.
-		require_once( BP_DOCS_INCLUDES_PATH . 'addon-moderation.php' );
-		$this->moderation = new BP_Docs_Moderation();
-		$this->moderation->add_hooks();
-
-		do_action( 'bp_docs_load_doc_extras' );
-	}
-
-	/**
-	 * Registers AJAX actions for BP 12+.
-	 *
-	 * @since 2.2.3
-	 *
-	 * @return void
-	 */
-	public function register_ajax_actions() {
-		if ( ! function_exists( 'bp_ajax_register_action' ) ) {
-			return;
-		}
-
-		$ajax_actions = array(
-			'add_edit_lock',
-			'bp_docs_create_dummy_doc',
-			'doc_attachment_item_markup',
-			'refresh_access_settings',
-			'refresh_associated_group',
-			'remove_edit_lock',
+		$args = array(
+			'labels'              => $labels,
+			'public'              => true,
+			'publicly_queryable'  => true,
+			'show_ui'             => current_user_can( 'bp_moderate' ),
+			'show_in_menu'        => 'bp-docs',
+			'query_var'           => true,
+			'rewrite'             => array(
+				'slug'       => $this->slug,
+				'with_front' => false,
+			),
+			'capability_type'     => 'post',
+			'has_archive'         => true,
+			'hierarchical'        => false,
+			'menu_position'       => null,
+			'supports'            => array( 'title', 'editor', 'author', 'comments', 'revisions' ),
+			'show_in_rest'        => true,
+			'rest_base'           => $this->post_type_name,
+			'rest_controller_class' => 'WP_REST_Posts_Controller',
 		);
 
-		foreach ( $ajax_actions as $action ) {
-			bp_ajax_register_action( $action );
-		}
+		register_post_type( $this->post_type_name, $args );
 	}
 
 	/**
-	 * Add rewrite tags
+	 * Register the Recent Docs widget.
 	 *
 	 * @since 1.2
 	 */
-	function add_rewrite_tags() {
-		add_rewrite_tag( '%%' . BP_DOCS_EDIT_SLUG      . '%%', '([1]{1,})' );
-		add_rewrite_tag( '%%' . BP_DOCS_HISTORY_SLUG   . '%%', '([1]{1,})' );
-		add_rewrite_tag( '%%' . BP_DOCS_DELETE_SLUG    . '%%', '([1]{1,})' );
-		add_rewrite_tag( '%%' . BP_DOCS_UNTRASH_SLUG    . '%%', '([1]{1,})' );
-		add_rewrite_tag( '%%' . BP_DOCS_CREATE_SLUG    . '%%', '([1]{1,})' );
-		add_rewrite_tag( '%%' . BP_DOCS_MY_GROUPS_SLUG . '%%', '([1]{1,})' );
-		add_rewrite_tag( '%%' . BP_DOCS_UNLINK_FROM_GROUP_SLUG . '%%', '([1]{1,})' );
-
-	}
-
-	/**
-	 * Generates custom rewrite rules
-	 *
-	 * @since 1.2
-	 */
-	function generate_rewrite_rules( $wp_rewrite ) {
-		$bp_docs_rules = array(
-			/**
-			 * Top level
-			 */
-
-			// Create
-			bp_docs_get_docs_slug() . '/' . BP_DOCS_CREATE_SLUG . '/?$' =>
-				'index.php?post_type=' . $this->post_type_name . '&name=' . $wp_rewrite->preg_index( 1 ) . '&' . BP_DOCS_CREATE_SLUG . '=1',
-
-			// My Groups
-			bp_docs_get_docs_slug() . '/' . BP_DOCS_MY_GROUPS_SLUG . "/{$wp_rewrite->pagination_base}/([0-9]{1,})/?$" =>
-				'index.php?post_type=' . $this->post_type_name . '&' . BP_DOCS_MY_GROUPS_SLUG . '=1' . '&paged=' . $wp_rewrite->preg_index( 1 ),
-			bp_docs_get_docs_slug() . '/' . BP_DOCS_MY_GROUPS_SLUG . '/?$' =>
-				'index.php?post_type=' . $this->post_type_name . '&name=' . $wp_rewrite->preg_index( 1 ) . '&' . BP_DOCS_MY_GROUPS_SLUG . '=1',
-
-			/**
-			 * Single Docs
-			 */
-
-			// Edit
-			bp_docs_get_docs_slug() . '/([^/]+)/' . BP_DOCS_EDIT_SLUG . '/?$' =>
-				'index.php?post_type=' . $this->post_type_name . '&name=' . $wp_rewrite->preg_index( 1 ) . '&' . BP_DOCS_EDIT_SLUG . '=1',
-
-			// History
-			bp_docs_get_docs_slug() . '/([^/]+)/' . BP_DOCS_HISTORY_SLUG . '/?$' =>
-				'index.php?post_type=' . $this->post_type_name . '&name=' . $wp_rewrite->preg_index( 1 ) . '&' . BP_DOCS_HISTORY_SLUG . '=1',
-
-			// Delete
-			bp_docs_get_docs_slug() . '/([^/]+)/' . BP_DOCS_DELETE_SLUG . '/?$' =>
-				'index.php?post_type=' . $this->post_type_name . '&name=' . $wp_rewrite->preg_index( 1 ) . '&' . BP_DOCS_HISTORY_SLUG . '=1',
-
-			// Untrash
-			bp_docs_get_docs_slug() . '/([^/]+)/' . BP_DOCS_UNTRASH_SLUG . '/?$' =>
-				'index.php?post_type=' . $this->post_type_name . '&name=' . $wp_rewrite->preg_index( 1 ) . '&' . BP_DOCS_UNTRASH_SLUG . '=1',
-
-			// Unlink from group
-			bp_docs_get_docs_slug() . '/([^/]+)/' . BP_DOCS_UNLINK_FROM_GROUP_SLUG . '/?$' =>
-				'index.php?post_type=' . $this->post_type_name . '&name=' . $wp_rewrite->preg_index( 1 ) . '&' . BP_DOCS_UNLINK_FROM_GROUP_SLUG . '=1',
-
-		);
-
-		// Merge Docs rules with existing
-		$wp_rewrite->rules = array_merge( $bp_docs_rules, $wp_rewrite->rules );
-
-		return $wp_rewrite;
-	}
-
-	/**
-	 * Show the CPT Dashboard UI to the current user?
-	 *
-	 * Defaults to is_super_admin(), but is filterable
-	 *
-	 * @since 1.0.8
-	 *
-	 * @return bool $show_ui
-	 */
-	function show_cpt_ui() {
-		$show_ui = is_super_admin();
-
-		return apply_filters( 'bp_docs_show_cpt_ui', $show_ui );
-	}
-
-	/**
-	 * Handles stuff that needs to be done at 'parse_query'
-	 *
-	 * - Ensures that no post is loaded on the creation screen
-	 * - Ensures that an archive template is loaded in /docs/my-groups/
-	 */
-	function parse_query( $posts_query ) {
-
-		// Bail if $posts_query is not the main loop
-		if ( ! $posts_query->is_main_query() )
-			return;
-
-		// Bail if filters are suppressed on this query
-		if ( true == $posts_query->get( 'suppress_filters' ) )
-			return;
-
-		// Bail if in admin
-		if ( is_admin() )
-			return;
-
-		// Don't query for any posts on /docs/create/
-		if ( $posts_query->get( BP_DOCS_CREATE_SLUG ) ) {
-			$posts_query->is_404 = false;
-			$posts_query->set( 'p', -1 );
-		}
-
-		// Fall back on archive template on /docs/my-groups/
-		if ( $posts_query->get( BP_DOCS_MY_GROUPS_SLUG ) ) {
-			$posts_query->is_404 = false;
-		}
-
-		// For single Doc views, allow access to 'deleted' or 'pending' items
-		// that the current user is the admin of
-		if ( $posts_query->is_single && bp_docs_get_post_type_name() === $posts_query->get( 'post_type' ) ) {
-
-			$doc_slug = $posts_query->get( 'name' );
-
-			// Direct query, because barf
-			global $wpdb;
-			$author_id = $wpdb->get_var( $wpdb->prepare(
-				"SELECT post_author FROM {$wpdb->posts} WHERE post_type = %s AND post_name = %s",
-				bp_docs_get_post_type_name(),
-				$doc_slug
-			) );
-
-			// Post author or mod can visit it
-			if ( $author_id && ( $author_id == get_current_user_id() || current_user_can( 'bp_moderate' ) ) ) {
-				$posts_query->set( 'post_status', array( 'publish', 'trash', 'bp_docs_pending' ) );
-
-				// Make the 'trash' post status public
-				add_filter( 'posts_request', array( $this, 'make_post_statuses_public' ) );
-
-				// ... and undo that when we're done
-				add_filter( 'the_posts', array( $this, 'remove_make_post_statuses_public' ) );
-			}
-		}
-	}
-
-	/**
-	 * Make the 'trash' post status public.
-	 *
-	 * This is an unavoidable hack for cases where we want a trashed doc
-	 * to be visitable by the post author or by an admin.
-	 *
-	 * Access is public because it needs to be accessible by
-	 * call_user_func(), but should *not* be called directly.
-	 *
-	 * @since BuddyPress 1.5.5
-	 *
-	 * @param $request Passthrough.
-	 */
-	public function make_post_statuses_public( $request ) {
-		global $wp_post_statuses;
-		$wp_post_statuses['trash']->public = true;
-		$wp_post_statuses['bp_docs_pending']->public = true;
-		return $request;
-	}
-
-	/**
-	 * Reverse the public-trash hack applied in self::make_trash_public()
-	 *
-	 * @since BuddyPress 1.5.5
-	 *
-	 * @param $posts Passthrough.
-	 */
-	public function remove_make_post_statuses_public( $posts ) {
-		global $wp_post_statuses;
-		$wp_post_statuses['trash']->public = false;
-		$wp_post_statuses['bp_docs_pending']->public = false;
-		return $posts;
-	}
-
-	/**
-	 * Protects group docs from unauthorized access
-	 *
-	 * @since 1.2
-	 */
-	function protect_doc_access() {
-		// What is the user trying to do?
-		if ( bp_docs_is_doc_read() ) {
-			$action = 'bp_docs_read';
-		} else if ( bp_docs_is_doc_create() ) {
-			$action = 'bp_docs_create';
-		} else if ( bp_docs_is_doc_edit() ) {
-			$action = 'bp_docs_edit';
-		} else if ( bp_docs_is_doc_history() ) {
-			$action = 'bp_docs_view_history';
-		}
-
-		if ( ! isset( $action ) ) {
-			return;
-		}
-
-		if ( current_user_can( $action ) ) {
-			return;
-		}
-
-		if ( ! is_user_logged_in() ) {
-			$redirect_to = bp_docs_get_doc_link();
-
-			bp_core_no_access( array(
-				'mode' => 2,
-				'redirect' => $redirect_to,
-			) );
-		} else {
-			bp_core_add_message( __( 'You do not have permission to do that.', 'buddypress-docs' ), 'error' );
-			bp_core_redirect( bp_get_root_url() );
-		}
-	}
-
-	function flush_rewrite_rules() {
-		if ( ! is_admin() ) {
-			return;
-		}
-
-		if ( ! is_super_admin() ) {
-			return;
-		}
-
-		global $wp_rewrite;
-
-		// Check to see whether our rules have been registered yet, by
-		// finding a Docs rule and then comparing it to the registered rules
-		$test_rewrite = null;
-		foreach ( $wp_rewrite->extra_rules_top as $rewrite => $rule ) {
-			if ( 0 === strpos( $rewrite, bp_docs_get_docs_slug() ) ) {
-				$test_rewrite = $rewrite;
-				$test_rule = $rule;
-				break;
-			}
-		}
-		$registered_rules = get_option( 'rewrite_rules' );
-
-		if ( $test_rewrite && is_array( $registered_rules ) && ( ! isset( $registered_rules[ $test_rewrite ] ) || $test_rule !== $registered_rules[ $test_rewrite ] ) ) {
-			flush_rewrite_rules();
-		}
-	}
-
-	/**
-	 * Initiates the BP Component extension
-	 *
-	 * @since 1.0-beta
-	 */
-	function do_integration() {
-		global $bp;
-
-		$bp->bp_docs = new BP_Docs_Component;
+	public function register_widget() {
+		register_widget( 'BP_Docs_Recent_Docs_Widget' );
 	}
 }
+
+/**
+ * Singleton function.
+ *
+ * @return BP_Docs
+ */
+function buddypress_docs() {
+	return BP_Docs::instance();
+}
+add_action( 'plugins_loaded', 'buddypress_docs', 9 );
