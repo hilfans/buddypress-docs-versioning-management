@@ -1,0 +1,21 @@
+.bp-docs-category-counts {
+    margin-bottom: 20px;
+}
+.bp-docs-category-counts h3 {
+    font-size: 1.2em;
+    margin-bottom: 10px;
+}
+.bp-docs-category-counts ul {
+    list-style: none;
+    padding: 0;
+}
+.bp-docs-category-counts li {
+    margin-bottom: 5px;
+}
+.bp-docs-category-counts a {
+    text-decoration: none;
+    color: #0073aa;
+}
+.bp-docs-category-counts a:hover {
+    text-decoration: underline;
+}
