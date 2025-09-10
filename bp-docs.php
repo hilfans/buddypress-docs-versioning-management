@@ -234,9 +234,6 @@ class BP_Docs {
 
 		// Enqueue JS and CSS.
 		add_action( 'bp_docs_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
-
-		// Register the widget.
-		add_action( 'widgets_init', array( $this, 'register_widget' ) );
 	}
 
 	/**
@@ -381,3 +378,4 @@ function buddypress_docs() {
 	return BP_Docs::instance();
 }
 add_action( 'plugins_loaded', 'buddypress_docs', 9 );
+
