@@ -72,7 +72,7 @@ add_action('bp_docs_before_docs_loop', 'bp_docs_display_category_counts');
  * Add basic styling for category counts display
  */
 function bp_docs_enqueue_category_styles() {
-    wp_enqueue_style('bp-docs-categories', plugins_url('css/bp-docs-categories.css', __DIR__));
+    wp_enqueue_style('bp-docs-categories', plugins_url('includes/css/bp-docs-categories.css', __DIR__));
 }
 add_action('wp_enqueue_scripts', 'bp_docs_enqueue_category_styles');
 ?>
